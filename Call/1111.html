@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<HTML>
+
+<HEAD>
+  <TITLE>Назначение владельцем заявки</TITLE>
+  <META content="text/html; charset=utf-8" http-equiv=Content-Type>
+  <META name=GENERATOR content="MSHTML 11.00.10570.1001">
+  <STYLE>
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100% !important;
+      background-color: #f5f5f5;
+    }
+
+    .content-wrapper {
+      border: 1px solid #dddddd;
+      width: 650px;
+      background-color: #ffffff;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    .WordSection1 {
+      width: 100%;
+      max-width: 600px;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    .step {
+      max-width: 100% !important;
+      height: auto !important;
+      display: block;
+      margin: 0 auto;
+      border: 0;
+    }
+
+    .card {
+      background: #f8fafc;
+      font-size: 14px;
+      border-radius: 10px;
+      border: 1px solid #e2e8f0;
+      overflow: hidden;
+    }
+
+    .card-header {
+      text-transform: uppercase;
+      text-indent: 1px;
+      font-weight: 600;
+      font-size: 14px;
+      padding-left: 15px;
+      padding-right: 15px;
+      padding-top: 10px;
+      padding-bottom: 10px;
+
+      /* --- НАЧАЛО ИЗМЕНЕНИЙ --- */
+      /* Запасной цвет (для старых Outlook) */
+      /* background-color: #2a5298;  */
+      /* Градиент: от основного синего к более темному/насыщенному */
+      background: linear-gradient(90deg, #5875a7 0%, #15386e 100%);
+      /* Белый текст */
+      color: #ffffff !important;
+      /* --- КОНЕЦ ИЗМЕНЕНИЙ --- */
+    }
+
+    .card-body {
+      text-indent: 1px;
+      font-size: 14px;
+      padding-top: 10px;
+      padding-left: 15px;
+      padding-right: 15px;
+      margin: 15px 15px;
+      color: #3f3f3f;
+    }
+
+    .card-bottom {
+      text-indent: 1px;
+      font-size: 14px;
+      margin-top: 0px;
+      padding-top: 8px;
+      padding-left: 15px;
+      padding-right: 15px;
+      padding-bottom: 11px;
+      color: #3f3f3f;
+    }
+
+    .card-bottom b,
+    .card-body b {
+      font-weight: 600;
+    }
+
+    .divider-blue {
+      display: none;
+    }
+
+    .divider-grey {
+      font-size: 2px;
+      padding-bottom: 3px;
+      border-bottom: #dadada 1px solid;
+    }
+
+    .sign {
+      padding-left: 10px;
+      font-size: 12px;
+      COLOR: #2a5298;
+    }
+
+    .sign A {
+      text-decoration: underline;
+      COLOR: #2a5298;
+    }
+
+    .bottom {
+      FONT-SIZE: 12px;
+      BORDER-TOP: #dddddd 1px solid;
+      COLOR: #888888;
+      PADDING: 15px;
+      BACKGROUND-COLOR: #f8f8f8;
+    }
+
+    .break {
+      font-size: 15px;
+    }
+
+    .pm,
+    .pm a,
+    .pm img {
+      margin: 0px;
+      padding: 0px;
+      FONT-SIZE: 0px;
+      border: 0;
+    }
+
+    .title-td {
+      color: #ffffff;
+      padding: 15px 20px;
+      background: #2a5298;
+    }
+
+    .title-div {
+      border-bottom: 1px solid #ffffff;
+      padding-bottom: 5px;
+      margin-bottom: 5px;
+      font-size: 15px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .title-callname  {
+      font-size: 12px;
+      padding-top: 21x;
+    }
+    .title-callname b {
+      text-transform: uppercase;
+      font-weight: 600;
+      
+    }
+  </STYLE>
+</HEAD>
+
+<BODY>
+  <TABLE style="BACKGROUND-COLOR: #f5f5f5" cellSpacing=0 cellPadding=0 width="100%" border=0>
+    <TBODY>
+      <TR>
+        <TD style="PADDING-BOTTOM: 20px; PADDING-TOP: 20px; PADDING-LEFT: 10px; PADDING-RIGHT: 10px" vAlign=top
+          align=center>
+
+          <TABLE role=presentation class=content-wrapper cellSpacing=0 cellPadding=0 width=650 border=0>
+            <TBODY>
+              <TR>
+                <TD class=title-td
+                  style="background: #2a5298; background: linear-gradient(90deg, #2a5298 0%, #4f8fe2 100%); color: #ffffff;">
+                  <DIV class=title-div>Вы назначены владельцем заявки № <a href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}" color="fff">
+                    {?Call.NumberString}</a></DIV>
+                  <DIV class=title-callname><B>Название: </B>{?Call.CallSummaryName}</DIV>
+                </TD>
+              </TR>
+
+              <TR>
+                <TD style="PADDING-BOTTOM: 10px; PADDING-TOP: 20px; PADDING-LEFT: 30px; PADDING-RIGHT: 30px">
+
+                  <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
+                    <TBODY>
+                      <TR>
+                        <TD>
+                          <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
+                            <TBODY>
+                              <TR>
+                                <TD class=pm align=left><A
+                                    style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px"
+                                    href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><IMG
+                                      style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px"
+                                      src="https://helpdesk.stepcon.ru/images/call_mini.png" alt="Перейти к заявке"></A>
+                                </TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV class=break>&nbsp;</DIV>
+
+                          <!-- Блок заявки -->
+
+                          <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" border=0>
+                            <TBODY>
+                              <TR>
+                                <!-- Дублируем стили inline для надежности -->
+                                <TD class=card-header
+                                  style="background: #2a5298; background: linear-gradient(90deg, #2a5298 0%, #3285f1 100%); color: #ffffff;">
+                                  Заявка №
+                                  {?Call.NumberString}
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD class=card-body><B>{?Call.CallSummaryName}</B>
+                                  <DIV class=divider-grey>&nbsp;</DIV>
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD class=card-bottom>{?Call.HTMLDescription}</TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV class=break>&nbsp;</DIV>
+
+                          <!-- Дополнительная информация -->
+
+                          <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" border=0>
+                            <TBODY>
+                              <TR>
+                                <!-- Дублируем стили inline -->
+                                <TD class=card-header
+                                  style="background: #2a5298; background: linear-gradient(90deg, #2a5298 0%, #3285f1 100%); color: #ffffff;">
+                                  Дополнительная
+                                  информация о заявке
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD class=card-bottom>
+                                  <DIV><b>Клиент:</b>
+                                    {?Call.ClientFullName}</DIV>
+                                  <DIV style="MARGIN-TOP: 5px"><b>Должность:</b>
+                                    {?Call.ClientPositionName}</DIV>
+                                  <DIV style="MARGIN-TOP: 5px"><b>Подразделение:</b>
+                                    {?Call.ClientSubdivisionName}</DIV>
+                                  <DIV style="MARGIN-TOP: 5px"><b>Обещанный срок
+                                      решения:</b> {?Call.DatePromisedString}
+                                  </DIV>
+                                  <DIV style="MARGIN-TOP: 5px"><b>Сервис:
+                                    </b>{?Call.ServiceName}</DIV>
+                                  <DIV style="MARGIN-TOP: 5px"><b>Услуга:
+                                    </b>{?Call.ServiceAttendanceFullName}</DIV>
+                                </TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV class=break>&nbsp;</DIV>
+
+                          <!-- Подпись -->
+                          <DIV class=sign>
+                            <DIV>С уважением,<BR>Служба ИТ поддержки. </DIV><BR>
+                            <DIV style="FONT-SIZE: 13px">Также вы можете обратиться в
+                              службу поддержки через <A href="{?Call.WebServerAddress}">веб-интерфейс</A></DIV>
+                          </DIV>
+                        </TD>
+                      </TR>
+                    </TBODY>
+                  </TABLE>
+                </TD>
+              </TR>
+
+              <!-- Подвал -->
+              <TR>
+                <TD class=bottom align=center>
+                  <div>© 2025 Служба поддержки. Все права
+                    защищены.</div>
+                </TD>
+              </TR>
+            </TBODY>
+          </TABLE>
+        </TD>
+      </TR>
+    </TBODY>
+  </TABLE>
+</BODY>
+
+</HTML>
