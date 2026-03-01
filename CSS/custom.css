@@ -1,0 +1,909 @@
+﻿@charset "UTF-8";
+
+/* главный контейнер меню */
+#mainMenu .mainMenuCenter {
+    border-left: none !important;
+    border-right: none !important;
+}
+
+/* список действий справа */
+#mainMenu .mainMenuActionsList {
+    border-left: none !important;
+    border-right: none !important;
+}
+
+.dashboard-navigator-header {
+    font-size: 21px !important;
+    padding: 15px 25px !important;
+    background: #00a5e0 !important;
+    border-right: none !important;
+    text-transform: uppercase !important;
+    color: white !important;
+    text-align: left !important;
+    
+}
+
+.pin-icon {
+    -webkit-transition: -webkit-transform 0.3s ease !important; /* Для старых версий WebKit */
+    transition: transform 0.3s ease !important
+}
+
+.pin-icon:hover {
+    background: url(../images/pin.png) no-repeat !important;
+    -webkit-transform: rotate(90deg) !important; /* Для старых версий WebKit */
+    transform: rotate(90deg) !important;
+}
+.dashboard-navigator-pin-container {
+    right: 10px !important;
+   
+}
+
+
+.mainMenuAction,
+.b-content-table__workplaceIcon
+ {
+	transition: transform 0.5s ease-in-out !important;
+	
+}
+.mainMenuAction:hover,
+.b-content-table__workplaceIcon:hover
+{
+   transform: scale(1.1) !important;
+   transition: transform 0.2s ease-in-out !important;
+}
+/* ========================================================= */
+/* ИНФРАМЕНЕДЖЕР: PREMIUM UI 5.0 (FINAL + ROTATING ARROWS) */
+/* ========================================================= */
+
+/* --- 1. ГЛОБАЛЬНАЯ ЧИСТКА --- */
+.arrowUp-white, .arrowDown-white, .dashboard-folder-arrow { display: none !important; }
+.text-overflow-ellipsis, .dashboard-folder-name { margin: 0 !important; padding: 0 !important; }
+
+
+/* --- 2. АНИМАЦИИ (ПЛАВНОЕ ПОЯВЛЕНИЕ) --- */
+@keyframes menuReveal {
+    0% { opacity: 0; transform: translateY(-10px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+a.b-blueMenu__item-link,
+a.b-blueMenu__item-subitem {
+    animation: menuReveal 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    opacity: 0; 
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+
+/* КАСКАДНАЯ ЗАДЕРЖКА */
+div:nth-child(1) > a.b-blueMenu__item-subitem { animation-delay: 0ms; }
+div:nth-child(2) > a.b-blueMenu__item-subitem { animation-delay: 30ms; }
+div:nth-child(3) > a.b-blueMenu__item-subitem { animation-delay: 60ms; }
+div:nth-child(4) > a.b-blueMenu__item-subitem { animation-delay: 90ms; }
+div:nth-child(5) > a.b-blueMenu__item-subitem { animation-delay: 120ms; }
+div:nth-child(6) > a.b-blueMenu__item-subitem { animation-delay: 150ms; }
+div:nth-child(7) > a.b-blueMenu__item-subitem { animation-delay: 180ms; }
+div:nth-child(8) > a.b-blueMenu__item-subitem { animation-delay: 210ms; }
+div:nth-child(9) > a.b-blueMenu__item-subitem { animation-delay: 240ms; }
+div:nth-child(10) > a.b-blueMenu__item-subitem { animation-delay: 270ms; }
+
+
+/* --- 3. БАЗА (ВСЕ ССЫЛКИ) --- */
+a.b-blueMenu__item-link,
+a.b-blueMenu__item-subitem {
+    display: block !important;
+    text-decoration: none !important;
+    border: none !important;
+    border-bottom: 1px solid rgba(255,255,255,0.03) !important;
+    position: relative !important;
+    font-weight: 400 !important;
+    color: #bdc3c7 !important;
+    background: transparent !important;
+    padding: 10px 15px 10px 50px !important;
+    min-height: 38px !important;
+    font-size: 13px !important;
+    text-transform: none !important;
+    box-sizing: border-box !important;
+}
+
+/* ИКОНКА ГРАФИКА */
+a.b-blueMenu__item-link::before,
+a.b-blueMenu__item-subitem::before {
+    content: "\1F4CA"; /* 📊 */
+    position: absolute;
+    left: 28px;
+    top: 39% !important;
+    transform: translateY(-50%);
+    color: #3498db;
+    font-size: 15px;
+    line-height: 1;
+    text-shadow: 0 0 10px rgba(52, 152, 219, 0.4);
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+a.b-blueMenu__item-link::after,
+a.b-blueMenu__item-subitem::after { display: none !important; }
+
+
+/* --- 4. КОРНЕВЫЕ ЗАГОЛОВКИ (STEP) --- */
+a.b-blueMenu__item-link:has(.dashboard-folder-arrow span), 
+a.b-blueMenu__item-link:has(.arrowUp-white),
+a.b-blueMenu__item-link:has(.arrowDown-white) {
+    background-color: #263238 !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+    padding: 14px 20px !important;
+    color: #ecf0f1 !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;
+    opacity: 1 !important; 
+    animation: none !important; 
+}
+
+/* СТРЕЛКА (Логика поворота) */
+a.b-blueMenu__item-link:has(.dashboard-folder-arrow span)::after,
+a.b-blueMenu__item-link:has(.arrowUp-white)::after {
+    content: "\203A" !important; /* Символ › */
+    display: block !important;
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    
+    /* Центрируем по вертикали и готовим к повороту */
+    transform-origin: center center; 
+    transition: transform 0.3s ease !important; /* Плавный поворот */
+    
+    font-size: 24px !important;
+    color: rgba(255,255,255,0.4);
+    line-height: 0.5 !important; /* Хак для центрирования символа › */
+    margin-top: -2px; /* Микро-коррекция высоты */
+}
+
+/* 1. Если меню ЗАКРЫТО (по умолчанию или есть класс closed) -> Смотрит ВПРАВО */
+.b-blueMenu__item-closed > a.b-blueMenu__item-link::after {
+    transform: translateY(-50%) rotate(0deg) !important;
+}
+
+/* 2. Если меню ОТКРЫТО -> Смотрит ВНИЗ */
+.b-blueMenu__item-opened > a.b-blueMenu__item-link::after {
+    transform: translateY(-50%) rotate(90deg) !important;
+}
+
+/* Убираем иконку графиков у папок */
+a.b-blueMenu__item-link:has(.dashboard-folder-arrow span)::before { display: none !important; }
+
+
+/* --- 5. ВЛОЖЕННЫЕ ПАПКИ --- */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]) {
+    font-weight: 700 !important;
+    color: #fff !important;
+    padding: 10px 10px 10px 30px !important;
+    background-color: rgba(255,255,255,0.03) !important;
+}
+
+/* СТРЕЛКА ДЛЯ ВЛОЖЕННЫХ ПАПОК */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"])::after {
+    content: "\203A";
+    display: block !important;
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform-origin: center center;
+    transition: transform 0.3s ease !important;
+    
+    font-size: 18px !important;
+    color: rgba(255,255,255,0.3);
+    line-height: 0.5 !important;
+    margin-top: -2px;
+}
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"])::before { display: none !important; }
+
+/* Логика поворота для вложенных папок */
+/* Тут сложнее, так как класс opened вешается на РОДИТЕЛЯ ссылки (div.b-blueMenu__item-subitems) */
+
+/* Закрыто (Вправо) */
+.b-blueMenu__item-closed > a.b-blueMenu__item-subitem::after {
+    transform: translateY(-50%) rotate(0deg) !important;
+}
+/* Открыто (Вниз) */
+.b-blueMenu__item-opened > a.b-blueMenu__item-subitem::after {
+    transform: translateY(-50%) rotate(90deg) !important;
+}
+
+
+/* --- 6. ВЛОЖЕННЫЕ ДАШБОРДЫ --- */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 20px"]),
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 30px"]) {
+    padding-left: 65px !important;
+}
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 20px"])::before,
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 30px"])::before {
+    left: 41px !important;
+    top: 44% !important;
+}
+
+
+/* --- 7. ФИКС РАСХОЖДЕНИЙ --- */
+.b-dashboardhead-menu > div:last-child > .b-blueMenu__item-link {
+    background: transparent !important;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    padding-left: 50px !important;
+    color: #bdc3c7 !important;
+    text-shadow: none !important;
+    letter-spacing: normal !important;
+    animation: menuReveal 0.4s ease forwards !important;
+}
+.b-dashboardhead-menu > div:last-child > .b-blueMenu__item-link::before {
+    display: block !important;
+    left: 28px !important;
+    top: 39% !important;
+}
+.b-dashboardhead-menu > div:last-child > .b-blueMenu__item-link::after { display: none !important; }
+
+
+/* --- 8. ИНТЕРАКТИВНОСТЬ --- */
+a.b-blueMenu__item-link:hover,
+a.b-blueMenu__item-subitem:hover {
+    background-color: rgba(65, 170, 237, 0.1) !important;
+    color: #ffffff !important;
+    cursor: pointer;
+    box-shadow: inset 3px 0 0 0 #41aaed !important;
+}
+
+/* --- 5. ВЛОЖЕННЫЕ ПАПКИ (ИСПРАВЛЕННАЯ ЛОГИКА) --- */
+/* Папка - это элемент с отступом 10px, У КОТОРОГО ЕСТЬ СТРЕЛКА ВНУТРИ */
+/* Используем множественный :has для точности */
+
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.arrowDown-white),
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.arrowUp-white),
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.dashboard-folder-arrow) {
+    font-weight: 700 !important;
+    color: #fff !important;
+    padding: 10px 10px 10px 30px !important;
+    background-color: rgba(255,255,255,0.03) !important;
+}
+
+/* СТРЕЛКА-ШЕВРОН (Рисуем ТОЛЬКО если есть родная стрелка) */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.arrowDown-white)::after,
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.arrowUp-white)::after,
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.dashboard-folder-arrow)::after {
+    content: "\203A";
+    display: block !important;
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform-origin: center center;
+    transition: transform 0.3s ease !important;
+    font-size: 14px;
+    color: rgba(255,255,255,0.3);
+    line-height: 0.5 !important;
+    margin-top: -2px;
+}
+/* Скрываем иконку графика у папок */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.arrowDown-white)::before,
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):has(.arrowUp-white)::before { 
+    display: none !important; 
+}
+
+/* --- 5.1. УНИВЕРСАЛЬНЫЙ ФИКС ДЛЯ ДАШБОРДОВ-СИРОТ --- */
+/* (Элементы без стрелок, но которые система считает папками) */
+
+/* ВАРИАНТ А: Если это уровень 2 (Дети, как "Движение по складам") */
+/* margin-left: 10px */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):not(:has(.arrowDown-white)):not(:has(.arrowUp-white)) {
+    font-weight: 400 !important;
+    color: #bdc3c7 !important;
+    background: transparent !important;
+    
+    /* КЛЮЧЕВОЙ МОМЕНТ: Отступ такой же, как у соседних папок + место под иконку */
+    /* У папок padding-left: 30px. Мы делаем чуть больше для текста */
+    padding-left: 45px !important; 
+}
+
+/* Иконка для уровня 2 */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 10px"]):not(:has(.arrowDown-white)):not(:has(.arrowUp-white))::before {
+    content: "\1F4CA" !important;
+    display: block !important;
+    position: absolute;
+    left: 20px !important;  /* Иконка стоит там же, где стрелки у папок-соседей */
+    top: 44% !important;
+    transform: translateY(-50%) !important;
+    color: #3498db;
+    font-size: 15px;
+    text-shadow: 0 0 10px rgba(52, 152, 219, 0.4);
+}
+
+/* ВАРИАНТ Б: Если это уровень 3 (Внуки, глубокие дашборды) */
+/* margin-left: 20px и более. Для них у нас уже есть правило в блоке 6, но на всякий случай */
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 20px"]):not(:has(.arrowDown-white)):not(:has(.arrowUp-white)) {
+    padding-left: 65px !important; /* Глубокий отступ */
+}
+a.b-blueMenu__item-subitem:has(div[style*="margin-left: 20px"]):not(:has(.arrowDown-white)):not(:has(.arrowUp-white))::before {
+    left: 41px !important; /* Иконка сдвинута */
+}
+
+/* Убираем стрелку у всех таких элементов */
+a.b-blueMenu__item-subitem:not(:has(.arrowDown-white)):not(:has(.arrowUp-white))::after {
+    display: none !important;
+}
+
+
+/* -----------------------------------------Поднимаем аватарку в ленте --------------------------------------- */
+.tapemessagesavatar,
+.tape__messages__avatar {
+    top: 5px !important; /* было 15px, подняли на 10px выше */
+}
+/*      Правка текста ФИО и должности в главном меню           */
+
+.mainMenuUserBlock {
+    padding-top: 20px !important;
+    padding-bottom: 20px!important;
+    padding-left: 7px!important;
+ 
+}
+
+/* Только сдвигаем текст, чтобы освободить место под аватарку */
+.mainMenuUserBlock-Text {
+	padding-top: 10px !important;
+	
+    position: relative !important;
+    padding-left: 0px !important;     /* Отступ слева под картинку */
+    line-height:45px !important;      /* Чтобы текст был по центру высоты аватарки */
+    display: inline-block !important;  /* На случай, если он блочный */
+}
+.mainMenuUserBlock-Text div:first-of-type {
+    font-weight: bold !important;
+    font-size: calc(100% + 2px) !important;
+}
+
+.mainMenuUserBlock-Text div {
+	margin-bottom: 5px !important;
+	white-space: normal !important;
+	overflow: inherit!important;
+	line-height:15px !important;
+	
+}
+
+
+
+/* ---------------------------------------------------- Лого на главной странице ------------------------------------------------------- */
+.mainMenuCompany .mainMenuCompanyLogo {
+    max-width: 280px!important;
+    max-height: calc(128px - 10px);
+    display: inline-block;
+    vertical-align: middle;
+	padding-left: 35px!important;
+}
+.minimalMenu .mainMenuCompany .mainMenuCompanyLogo {
+    max-width: 170px!important;
+    max-height: calc(64px - 4px);
+}
+.b-header-logoText img {
+    max-height: 45px!important;
+}
+/* Убираем текст "ИнфраМенеджер" из шапки на всех страницах, включая ошибки */
+.b-header-logoText span, 
+.mainMenuCompanyText {
+    display: none !important;
+}
+/* Скрываем телефон, должность и подразделение ТОЛЬКО в списке связанных заданий */
+
+.fieldPair.woRef__b .form-user-info,
+.fieldPair.woRef__b .form-user-dopinfo,
+.fieldPair.woRef__b .form-user-number,
+.woRef__list .form-user-phone,
+.woRef__list .form-user-info,
+.woRef__list .form-user-dopinfo {
+    display: none !important;
+}
+
+
+/* --- Стили для списка связанных заданий --- */
+
+/* 1. Скрываем лишние данные пользователя */
+
+.woRef__list .form-user-phone,
+.woRef__list .form-user-info,
+.woRef__list .form-user-dopinfo {
+    display: none !important;
+}
+
+/* 2. Подсветка самой строки задания "В работе" */
+.woRef__list .im-list-item.task-in-progress {
+    background-color: #e3f7ff !important;
+    border-left: 4px solid #108ee9;
+}
+
+/* 3. Жирный и синий текст статуса "В работе" */
+.woRef__list .im-list-item.task-in-progress .reference-object-status-text {
+    color: #108ee9; /* Или можно красный #d9534f, если нужно агрессивнее */
+    font-size: 11px; /* Чуть-чуть уменьшить, если капсом, или оставить как есть */
+}
+
+ /* 3. СТИЛЬ ДЛЯ ЗАВЕРШЕННЫХ (Закрыто, Отменено) */
+    .woRef__list .im-list-item.task-finished {
+        opacity: 0.8; /* Делаем всю строку полупрозрачной (бледной) */
+        background-color: #f9f9f9; /* Очень светло-серый фон */
+        border-left: 4px solid #888; /* Серая полоска слева */
+    }
+	 /* Делаем серым только слово "Исполнитель" (или "Группа" и т.д.) */
+    .woRef__list .im-list-item.task-finished .form-user-header {
+        color: #555 !important; /* Серый цвет */
+    }
+
+    /* Принудительно делаем текст серым для завершенных */
+    .woRef__list .im-list-item.task-finished .reference-object-main-header,
+    .woRef__list .im-list-item.task-finished .reference-object-status-text, 
+    .woRef__list .im-list-item.task-finished .form-user-name {
+        color: #555 !important;
+    }
+/* 4. ОТСТУП ДЛЯ ИКОНКИ */
+    .woRef__list .workorder-icon,
+	.woRef__list .finished-item-icon
+	{
+        margin-right: 10px !important;
+		background-size: contain !important;
+		width: 35px !important;
+		height: 35px !important;
+    }
+	
+	.woRef__list .im-list-item-status-column {
+    
+    margin-top: 5px !important;
+}
+
+
+/* "ПРИЧИННЫЙ ОБЪЕКТ" (CauseObject) */
+.wo-causeObject .im-list-item.cause-in-progress {
+    background-color: #e3f7ff !important;
+    border-left: 4px solid #108ee9;
+}
+
+.wo-causeObject .im-list-item.cause-in-progress .reference-object-status-text {
+    color: #108ee9 !important;
+    font-weight: bold;
+}
+
+.wo-causeObject .im-list-item.cause-finished {
+    opacity: 0.8;
+    background-color: #f9f9f9 !important;
+    border-left: 4px solid #999;
+}
+
+.wo-causeObject .im-list-item.cause-finished .reference-object-main-header,
+.wo-causeObject .im-list-item.cause-finished .reference-object-status-text,
+.wo-causeObject .im-list-item.cause-finished .reference-object-mode-text {
+    color: #555 !important;
+}
+
+/* "СВЯЗАНО С" (ReferenceObject) */
+
+
+
+.woRef__b .im-list-item.ref-in-progress .reference-object-status-text {
+    color: #108ee9 !important;
+    font-weight: bold;
+}
+
+.woRef__b .im-list-item.ref-finished {
+    opacity: 0.8;
+    background-color: #f9f9f9 !important;
+    border-left: 4px solid #888;
+}
+
+.woRef__b .im-list-item.ref-finished .reference-object-main-header,
+.woRef__b .im-list-item.ref-finished .reference-object-status-text,
+.woRef__b .im-list-item.ref-finished .form-user-name {
+    color: #555 !important;
+}
+/* ОТСТУП ДЛЯ ИКОНКИ */
+.woRef__b .im-list-item-icon-column > div {
+    margin-right: 10px !important;
+    background-size: contain !important;
+    width: 35px !important;
+    height: 35px !important;
+}
+/* ==========================================================================
+   СТИЛИ ДЛЯ СПИСКА ЗАЯВОК (CallList) в ПОИСКЕ на главной странице.
+   ========================================================================== */
+
+
+.foundObjects .im-list-item-main-column {
+    width: 100% !important;
+    max-width: 900px !important; 
+    min-width: 250px!important;
+}
+
+/* ==========================================================================
+   СТИЛИ ДЛЯ СПИСКА ЗАЯВОК (CallList) 
+   ========================================================================== */
+
+/* ==========================================================================
+   1. СТИЛИ СТРОК (Активные / Завершенные)
+   ========================================================================== */
+
+/* Базовый стиль для всех строк (закладываем прозрачную рамку) */
+.woRef__b .im-list-item.ref-in-progress,
+.cRef__list .im-list-item {
+    border-radius: 10px; 
+    transition: all 0.4s ease !important;  /* Анимируем сразу всё: фон, рамку и тень */
+	position: relative; /* Нужно, чтобы z-index сработал при наведении */
+}
+
+/* ЭФФЕКТ ПРИ НАВЕДЕНИИ НА ЛЮБУЮ СТРОКУ */
+.woRef__b .im-list-item.ref-in-progress:hover ,
+.cRef__list .im-list-item:hover {
+    cursor: pointer !important;
+    z-index: 2; /* Поднимаем строку выше соседей, чтобы рамка отрисовалась со всех сторон */
+    box-shadow: 
+        inset 0 0 0 1px #61d6f2, 
+        0 4px 10px rgba(97, 214, 242, 0.3) !important;
+        
+    z-index: 2 !important; /* Поднимаем слой выше, чтобы свечение не обрезалось соседями */
+    transition: all 0.2s ease !important;
+
+}
+
+/* АКТИВНЫЕ ЗАЯВКИ (В работе) */
+.cRef__list .im-list-item:not(.im-ref-finished) {
+    background-color: #0d4eda !important;       /* Голубой фон */
+}
+
+/* ЗАВЕРШЕННЫЕ ЗАЯВКИ (Закрыта, Отменена) */
+.woRef__b .im-list-item.ref-finished,
+.cRef__list .im-list-item.im-ref-finished {
+    background-color: #f9f9f9 !important;       /* Серый фон */
+    opacity: 0.85;                              /* Чуть-чуть прозрачности */
+}
+
+/*  Удаляем "Выполить до" из закрытой, выполненной заявки и выравниваем текст */
+
+
+.callRef-list .im-list-item.im-ref-finished .reference-object-mode-text {
+    display: none !important;
+}
+.callRef-list .im-list-item.im-ref-finished .im-list-item-main-column  {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: baseline !important;
+	
+    height: 100% !important; /* Чтобы колонка тянулась на всю высоту строки и центрировала контент */
+	
+}
+.callRef-list .im-list-item.im-ref-finished .im-list-item-main-column .im-list-item-main-firstrow {
+	margin-top: 0 !important;
+	
+ 	
+}
+
+
+
+
+/* Делаем текст серым для завершенных */
+.cRef__list .im-list-item.im-ref-finished .reference-object-main-header,
+.cRef__list .im-list-item.im-ref-finished span,
+.cRef__list .im-list-item.im-ref-finished div {
+    color: #777 !important;
+}
+
+
+/* --------------------------------------------------------------------------
+   2. ИКОНКА СТАТУСА (Слева от названия)
+   -------------------------------------------------------------------------- */
+
+/* Новая колонка для иконки */
+.cRef__list .im-list-item-icon-column {
+    width: 45px;                 /* Фиксированная ширина под иконку */
+    min-width: 45px;
+    display: flex;
+    align-items: center;         /* Центрирование по вертикали */
+    justify-content: center;     /* Центрирование по горизонтали */
+   
+}
+
+/* Сама иконка */
+.cRef__list .call-status-icon {
+    
+    width: 25px !important;
+    height: 25px !important;
+	vertical-align: middle!important;
+    background-repeat: no-repeat!important;
+    background-position: center!important;
+    background-size: contain !important;
+	margin-right: 10px !important;
+	
+    
+    /* Иконка "В работе" */
+    background-image: url('/Images/SDForms/linkStatus/link_call_processed.png');
+}
+
+/* Иконка для завершенных */
+.cRef__list .im-list-item.im-ref-finished .call-status-icon {
+    background-image: url('/Images/SDForms/linkStatus/link_finished.png');
+    opacity: 0.8;
+}
+/* Чекбокс по центру строки */
+.cRef__list .im-list-item-chb-column{
+  display: flex !important;
+  align-items: center !important;     /* вертикаль */
+  justify-content: center !important; /* горизонталь */
+  height: 100%;
+}
+
+/* На всякий случай уберем случайные отступы у инпута */
+.cRef__list .im-list-item__chb{
+  margin: 0 !important;
+}
+/* Корректируем основную колонку, так как слева появилась колонка иконки */
+.cRef__list .im-list-item-main-column {
+    padding-left: 10px !important; /* Уменьшаем отступ, так как там теперь иконка */
+}
+
+/* Остальные твои стили (цвета строк, скрытие полей юзера) - оставляй без изменений */
+
+/* --------------------------------------------------------------------------
+   3. БЛОК ПОЛЬЗОВАТЕЛЯ (Аватар + Скрытие полей)
+   -------------------------------------------------------------------------- */
+
+/* Скрываем лишние поля (Телефон, Должность, Подразделение) */
+.cRef__list .form-user-phone,
+.cRef__list .form-user-info,
+.cRef__list .form-user-dopinfo {
+    display: none !important;
+}
+
+/* Контейнер пользователя - защита от схлопывания */
+.cRef__list .im-list-item-user-column .call-client-info .form-user-container {
+    display: flex;
+    align-items: center;
+    min-height: 50px;           /* Фиксируем минимальную высоту */
+}
+
+/* Левая часть (Аватар) - резервируем место */
+.cRef__list .form-user-leftside {
+    min-width: 50px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+/* Сбрасываем гигантские отступы у аватарки */
+.cRef__list .form-user-icon {
+    margin: 0 10px 0 0 !important; /* Оставляем только отступ справа до имени */
+    
+    /* И на всякий случай фиксация размеров, чтобы не плющило */
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    min-height: 40px !important;
+}
+
+/* Центрируем контейнер, в котором лежит аватарка */
+.cRef__list .form-user-leftside {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    min-width: 50px;
+}
+
+/* Правая часть (Имя) - растягиваем */
+.cRef__list .form-user-rightside {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* Сам кружок аватарки */
+.cRef__list .form-user-icon {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important; /* Важно: запрещаем сжиматься */
+    min-height: 40px !important;
+    display: block !important;
+    background-color: #f0f0f0;  /* Серый фон, если картинки нет */
+    border: 1px solid #ddd;
+    border-radius: 10%;
+    margin-right: 10px;
+    box-sizing: border-box;
+}
+
+
+/* ==========================================================================
+   КОЛОНКА СТАТУСА (Убиваем системные отступы и ровняем)
+   ========================================================================== */
+
+/* 1. Колонка статуса */
+.cRef__list .im-list-item-status-column {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 100% !important;
+    margin: 0 !important; 
+    padding: 0 !important; 
+}
+
+/* 2. Обертка (Бейджик статуса) */
+.cRef__list .reference-object-status-textwrap {
+    display: inline-block !important; /* Откатываемся к самому стабильному способу */
+    padding: 3px 12px !important;
+    border-radius: 4px !important;
+    font-size: 11px !important;
+    line-height: normal !important;
+    
+    /* ТОЛЬКО РАМКА И ЦВЕТ ТЕКСТА */
+    background-color: transparent !important; 
+    color: #41aaed !important;            
+    border: 1px solid #41aaed !important; 
+    
+    /* УБИВАЕМ СИСТЕМНЫЕ ОТСТУПЫ */
+    margin: 0 !important;
+    margin-top: 0 !important; /* На всякий случай бьем точечно */
+}
+
+/* 3. Текст внутри */
+.cRef__list .reference-object-status-text {
+    display: inline !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* --------------------------------------------------------------------------
+   РАСКРАСКА СТАТУСОВ (Только рамка и цвет)
+   -------------------------------------------------------------------------- */
+
+
+/* в ожидании действия */
+.cRef__list .reference-object-status-textwrap[data-status*="арегист"],
+.cRef__list .reference-object-status-textwrap[data-status*="жидае"],
+.cRef__list .reference-object-status-textwrap[data-status*="пауз"],
+.cRef__list .reference-object-status-textwrap[data-status*="тложен"] {
+    color: #e67c00 !important;
+	
+    
+}
+
+/* Выполнена / Закрыта / Отменена */
+.cRef__list .reference-object-status-textwrap[data-status*="ыполнен"],
+.cRef__list .reference-object-status-textwrap[data-status*="акрыт"],
+.cRef__list .reference-object-status-textwrap[data-status*="авершен"],
+.cRef__list .reference-object-status-textwrap[data-status*="тменен"] {
+    color: #888888 !important;
+    
+}
+
+/* ЖЕСТКО заставляем текст статуса брать цвет от своей цветной рамки */
+.cRef__list .im-list-item .reference-object-status-textwrap .reference-object-status-text {
+    color: inherit !important;
+}
+
+
+/* 2) Делаем статус “иконка + текст” в одну строку и выравниваем */
+.callRef-list .reference-object-status-textwrap{
+ 
+  border: none !important;            /* Убираем рамку */
+   
+}
+
+/* 1. Уменьшаем ширину последней колонки со 150px до 110px (этого как раз хватит для даты) */
+.callRef-list .im-list-item-end-column {
+    min-width: 90px !important;
+    max-width: 90px !important;
+	margin-top: 0px !important;
+}
+
+/* 2. Разрешаем тексту переноситься и задаем межстрочный интервал */
+.callRef-list .reference-object-ended-text {
+    width: 100% !important;
+    white-space: normal !important;
+    line-height: 1.2 !important;
+}
+
+/* Плашка с номером заявки */
+.woRef__b .im-list-item.ref-in-progress .reference-object-main-header .ticket-number-badge,
+.callRef-list .ticket-number-badge {
+    display: inline-block;       /* Чтобы применились рамки и фон */
+    background-color: #e5f1ff;   /* Голубой фон */
+    color: #005b9f;              /* Синий текст */
+    padding: 1px 6px;            /* Внутренние отступы (делают плашку шире текста) */
+    border-radius: 4px;          /* Скругленные углы */
+    border: 1px solid #cce3fd;   /* Рамка */
+    margin-right: 6px;           /* Отступ от номера до названия */
+    font-size: 11px;
+    font-weight: bold;
+    vertical-align: baseline;      /* Чтобы номер не прыгал выше/ниже текста */
+}
+
+/* Текст названия (делаем его обычным, не жирным) */
+.callRef-list .ticket-name-text {
+	font-size: 14px !important;
+    font-weight: normal !important;
+	font-family: Helvetica, Arial, sans-serif;
+	color: #005b9f !important;
+	
+	
+	
+}
+
+.callRef-list .im-list-item-main-secondrow {
+    padding-top: 3px!important;
+    
+    
+}
+
+/* ===== Список проблем в заявке: карточный редизайн ===== */
+
+/* Базовый стиль карточки (общий для всех статусов) */
+.im-list-item:has(.problem-icon),
+.im-list-item:has(.finished-item-icon) {
+    border-radius: 6px !important;
+    border: 1px solid transparent !important;
+    margin-bottom: 5px !important;
+    padding: 6px 10px !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+    transition: border-color 0.15s, box-shadow 0.15s !important;
+}
+.finished-item-icon,
+.problem-icon {
+    background-size: contain !important; /* Иконка будет вписана в блок 43x43 без обрезки */
+	width: 35px !important;
+	height: 35px !important;
+	margin-right: 10px !important;
+	
+}
+
+/* Скрыть лишние поля пользователя */
+.im-list-item:has(.problem-icon) .form-user-phone,
+.im-list-item:has(.finished-item-icon) .form-user-phone,
+.im-list-item:has(.problem-icon) .form-user-info,
+.im-list-item:has(.finished-item-icon) .form-user-info,
+.im-list-item:has(.problem-icon) .form-user-dopinfo,
+.im-list-item:has(.finished-item-icon) .form-user-dopinfo {
+    display: none !important;
+}
+
+/* Убрать отступы от колонок */
+.im-list-item:has(.problem-icon) .im-list-item-status-column,
+.im-list-item:has(.finished-item-icon) .im-list-item-status-column,
+.im-list-item:has(.problem-icon) .im-list-item-end-column,
+.im-list-item:has(.finished-item-icon) .im-list-item-end-column,
+.im-list-item:has(.problem-icon) .im-list-item-user-column .form-user-icon,
+.im-list-item:has(.finished-item-icon) .im-list-item-user-column .form-user-icon {
+    margin-top: 0 !important;
+}
+
+/* Аватар  */
+.im-list-item:has(.problem-icon) .form-user-icon,
+.im-list-item:has(.finished-item-icon) .form-user-icon {
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 10% !important;
+}
+
+/* === ОТКРЫТАЯ — синяя === */
+.im-list-item:has(.problem-icon):not(:has(.finished-item-icon)) {
+    background: #f0f7ff !important;
+    border-color: #c5dff0 !important;
+}
+.im-list-item:has(.problem-icon):not(:has(.finished-item-icon)):hover {
+    border-color: #61d6f2 !important;
+    box-shadow: 0 2px 6px rgba(97, 214, 242, 0.25) !important;
+}
+
+/* === ЗАКРЫТАЯ — серая === */
+.im-list-item:has(.finished-item-icon) {
+    background: #f5f5f5 !important;
+    border-color: #d5d5d5 !important;
+    opacity: 0.85 !important;
+}
+.im-list-item:has(.finished-item-icon):hover {
+    border-color: #bbb !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1) !important;
+    opacity: 1 !important;
+}
+
+
+
+
+
+

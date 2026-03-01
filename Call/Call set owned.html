@@ -133,17 +133,15 @@
 
   .title-td {
    color: #ffffff;
-   padding: 15px 20px;
+   FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
    background: #2a5298;
   }
-
-  .title-div {
-   border-bottom: 1px solid #ffffff;
-   padding-bottom: 5px;
-   margin-bottom: 5px;
-   font-size: 16px;
-   font-weight: bold;
-
+.dop-info {
+FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+  .card-call-info td{
+  color:#2a5298;
+  
   }
  </STYLE>
 </HEAD>
@@ -152,80 +150,141 @@
  <TABLE style="BACKGROUND-COLOR: #f5f5f5" cellSpacing=0 cellPadding=0 width="100%" border=0>
   <TBODY>
    <TR>
-    <TD style="PADDING-BOTTOM: 20px; PADDING-TOP: 20px; PADDING-LEFT: 10px; PADDING-RIGHT: 10px" vAlign=top
+    <TD style="PADDING:10px" vAlign=top
      align=center>
 
-     <!-- Основной контейнер -->
-
-     <TABLE role=presentation class=content-wrapper cellSpacing=0 cellPadding=0 width=650 border=0>
-      <TBODY>
-       <TR>
-        <TD class=title-td style="BACKGROUND-COLOR: #2a5298">
-         <DIV class=title-div>Вы назначены владельцем заявки №
-          {?Call.NumberString} </DIV>
-         <DIV style="FONT-SIZE: 14px"><B>Название:
-          </B>{?Call.CallSummaryName}</DIV>
-        </TD>
-       </TR>
-
-       <!-- Основное содержимое -->
-
-       <TR>
-        <TD style="PADDING-BOTTOM: 10px; PADDING-TOP: 20px; PADDING-LEFT: 30px; PADDING-RIGHT: 30px">
-
-         <!-- Кнопка  -->
-         
-         <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
-          <TBODY>
-           <TR>
-            <TD>
-             <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
+       <!-- Основной контейнер -->
+      <TABLE role=presentation class=content-wrapper cellSpacing=0 cellPadding=0 
+      width=650 border=0>
+        <TBODY>
+        <TR>
+          <TD class=title-td style="BACKGROUND-COLOR: #2a5298">
+            <TABLE 
+            style="FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, sans-serif; COLOR: white" 
+            cellSpacing=0 cellPadding=0>
               <TBODY>
-               <TR>
-                <TD class=pm align=left><A
-                  style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px"
-                  href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><IMG
-                   style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px"
-                   src="https://helpdesk.stepcon.ru/images/call_mini.png" alt="Перейти к заявке"></A></TD>
-               </TR>
-              </TBODY>
-             </TABLE>
-             <DIV class=break>&nbsp;</DIV>
+              <TR>
+                <TD 
+                style="FONT-SIZE: 18px; FONT-WEIGHT: 600; PADDING-BOTTOM: 1px; PADDING-TOP: 10px; PADDING-LEFT: 20px; PADDING-RIGHT: 20px" 
+                colSpan=2>Вы назначены владельцем заявки № {?Call.NumberString} 
+                </TD></TR>
+              <TR>
+                <TD 
+                style="FONT-SIZE: 15px; FONT-WEIGHT: 400; PADDING-BOTTOM: 10px; PADDING-TOP: 5px; PADDING-LEFT: 20px; PADDING-RIGHT: 5px" 
+                width="1%" noWrap>Приоритет: <B>{?Call.PriorityName}</B></TD>
+                <TD style="PADDING-LEFT: 0px; MARGIN: 0px" vAlign=middle 
+                align=left>
+                  <DIV 
+                  style="FONT-SIZE: 0px; BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px; MARGIN: 0px; padding: 0">&nbsp;</DIV><IMG 
+                  style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; MARGIN: 0px; PADDING-RIGHT: 0px" 
+                  border=0 alt="" 
+                  src="{?Call.WebServerAddress}/images/icons/{?Call.PriorityName}.png" 
+                  width=18 height=18> </TD></TR></TBODY></TABLE></TD></TR>
+        <TR>
+          <TD 
+          style="PADDING-BOTTOM: 10px; PADDING-TOP: 20px; PADDING-LEFT: 30px; PADDING-RIGHT: 30px">
+            <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
+              <TBODY>
+              <TR>
+                <TD><!-- Карточка Заявка №  -->
+                  <TABLE class="card card-call-info" style="TEXT-DECORATION: none" cellSpacing=1 
+                  cellPadding=5 width="100%" border=0>
+                    <TBODY>
+                    <TR><!-- иконка  -->
+                      <TD 
+                      style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 12px; PADDING-RIGHT: 0px" 
+                      vAlign=middle width=20 align=left><IMG 
+                        style="TEXT-DECORATION: none; BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px; DISPLAY: block" 
+                        border=0 alt="" 
+                        src="{?Call.WebServerAddress}/images/icons/Call.png" 
+                        width=20 height=20> </TD><!-- Текст заявка №  -->
+                      <TD 
+                      style="FONT-SIZE: 16px; TEXT-DECORATION: none; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; WIDTH: 1%; WHITE-SPACE: nowrap; FONT-WEIGHT: 600" 
+                      vAlign=middle width="1%" noWrap align=left><A 
+                        style="CURSOR: pointer; TEXT-DECORATION: none; BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px" 
+                        href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><SPAN 
+                        style="TEXT-DECORATION: none; COLOR: #2a5298">Заявка 
+                        №{?Call.NumberString}</SPAN></A> <!------------Иконка Состояние заявки ------------------>
+                      <TD style="PADDING-LEFT: 20px" width=1 noWrap><IMG 
+                        style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px; DISPLAY: block" 
+                        border=0 alt="" 
+                        src="{?Call.WebServerAddress}/images/icons/{?Call.EntityStateName}.png" 
+                        width=20 height=20> </TD></TD><!------------Текст Состояние заявки ------------------>
+                      <TD 
+                      style="FONT-SIZE: 13px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; COLOR: #2a5298; PADDING-LEFT: 0px" 
+                      vAlign=middle width=1 noWrap 
+                        align=left>{?Call.EntityStateName} </TD>
+                        
+                        <!-- иконка перехода в заявку  -->
+
+                      <td align="right" style="padding:0;" width="1%" nowrap>открыть</td>
+                      <TD style="PADDING-RIGHT: 5px" align=right><A 
+                        style="CURSOR: pointer; TEXT-DECORATION: none; BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px" 
+                        href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><IMG 
+                        style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px; DISPLAY: block; MARGIN-RIGHT: 15px" 
+                        border=0 alt="Открыть заявку" 
+                        src="{?Call.WebServerAddress}/images/icons/forward.png" 
+                        width=25 height=25></A></TD></TR></TBODY></TABLE>
+
+                        <DIV>&nbsp;</DIV>
              
              <!-- Заявка -->
 
-             <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" border=0>
-              <TBODY>
-               <TR>
-                <TD class=card-header style="COLOR: #2a5298">Заявка №
-                 {?Call.NumberString}
-                 <DIV class=divider-blue>&nbsp;</DIV>
-                </TD>
-               </TR>
-               <TR>
-                <TD class=card-body><B>{?Call.CallSummaryName}</B>
-                 <DIV class=divider-grey>&nbsp;</DIV>
-                </TD>
-               </TR>
-               <TR>
-                <TD class=card-bottom>{?Call.HTMLDescription}</TD>
-               </TR>
-              </TBODY>
-             </TABLE>
-             <DIV class=break>&nbsp;</DIV>
+             <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" 
+                  border=0>
+                    <TBODY>
+                    <TR>
+                      <TD class=card-header style="COLOR: #2a5298"><!-- СТРОКА С ИКОНКОЙ  --->
+                        <TABLE cellSpacing=0 cellPadding=0 width="100%" 
+border=0>
+                          <TBODY>
+                          <TR>
+                            <TD 
+                            style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
+                            vAlign=middle width=25 align=left><IMG 
+                              style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px; DISPLAY: block" 
+                              border=0 alt="" 
+                              src="{?Call.WebServerAddress}/images/icons/Title.png" 
+                              width=20 height=20> </TD>
+                            <TD 
+                            style="FONT-SIZE: 14px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 500; COLOR: #2a5298" 
+                            vAlign=middle 
+                          align=left>{?Call.CallSummaryName}</TD></TR></TBODY></TABLE>
+                        <DIV class=divider-blue>&nbsp;</DIV></TD></TR>
+                    <TR></TR>
+                    <TR>
+                      <TD 
+                    class=card-bottom>{?Call.HTMLDescription}</TD></TR></TBODY></TABLE>
+                  <DIV class=break>&nbsp;</DIV>
 
              <!-- Дополнительная информация -->
 
-             <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" border=0>
-              <TBODY>
-               <TR>
-                <TD class=card-header style="COLOR: #2a5298">Дополнительная
-                 информация о заявке
-                 <DIV class=divider-blue>&nbsp;</DIV>
-                </TD>
-               </TR>
-               <TR>
-                <TD class=card-bottom>
+              <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" 
+                  border=0>
+                    <TBODY>
+                    <TR>
+                      <TD class=card-header style="COLOR: #2a5298">
+                        
+                        <!-- СТРОКА С ИКОНКОЙ  --->
+                        <TABLE cellSpacing=0 cellPadding=0 width="100%" 
+border=0>
+                          <TBODY>
+                          <TR>
+                            <TD 
+                            style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
+                            vAlign=middle width=25 align=left><IMG 
+                              style="BORDER-LEFT-WIDTH: 0px; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; DISPLAY: block; BORDER-TOP-WIDTH: 0px" 
+                              border=0 alt="" 
+                              src="{?Call.WebServerAddress}/images/icons/Info.png" 
+                              width=20 height=20> </TD>
+                            <TD 
+                            style="FONT-SIZE: 14px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 500; COLOR: #2a5298" 
+                            vAlign=middle 
+                        align=left>Дополнительная
+                 информация о заявке</TD></TR></TBODY></TABLE>
+                        <DIV class=divider-blue>&nbsp;</DIV></TD></TR>
+                    <TR>
+                      <TD class="card-bottom dop-info">
                  <DIV><b>Клиент:</b>
                   {?Call.ClientFullName}</DIV>
                  <DIV style="MARGIN-TOP: 5px"><b>Должность:</b>
@@ -239,9 +298,11 @@
                  <DIV style="MARGIN-TOP: 5px"><b>Услуга:
                   </b>{?Call.ServiceAttendanceFullName}</DIV>
                 </TD>
-               </TR>
-              </TBODY>
-             </TABLE>
+                      
+                      
+                      
+                      </TR></TBODY></TABLE>
+                 
              <DIV class=break>&nbsp;</DIV><!-- Подпись -->
              <DIV class=sign>
               <DIV>С уважением,<BR>Служба ИТ поддержки. </DIV><BR>
@@ -256,7 +317,7 @@
        </TR><!-- Подвал -->
        <TR>
         <TD class=bottom align=center>
-         <div>© 2025 Служба поддержки. Все права
+         <div>© 2026 Служба поддержки. Все права
           защищены.</div>
         </TD>
        </TR>
