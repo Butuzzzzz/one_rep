@@ -1,445 +1,365 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
-<HTML lang=ru><HEAD><TITLE>Заявка выполнена</TITLE>
-<META content="text/html; charset=utf-8" http-equiv=Content-Type>
-<META name=viewport content="width=device-width, initial-scale=1.0">
-<STYLE>
-    body {
-      margin: 0;
-      padding: 0;
-      width: 100% !important;
-      background-color: #f5f5f5;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+<HTML LANG="ru">
+
+<HEAD>
+  <TITLE>Заявка выполнена</TITLE>
+  <META CONTENT="text/html; charset=utf-8" HTTP-EQUIV="Content-Type" />
+  <META CONTENT="WIDTH=device-width, initial-scale=1.0" NAME="viewport" />
+  <STYLE>
+    .title-gradient {
+      background: linear-gradient(135deg, #2a5298 0%, #1e3c72 100%) !important;
     }
 
-    .content-wrapper {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      border: 1px solid #dddddd;
-      width: 650px;
-      background-color: #ffffff;
-      border-collapse: collapse;
-      text-align: left;
+    .card-cancel-gradient {
+      background: linear-gradient(135deg, #fff8f8 0%, #fff0f0 100%) !important;
+      box-shadow: 0 4px 12px rgba(214, 51, 51, 0.10) !important;
     }
 
-    /*БЛОК ОЦЕНОК*/
-
-    .td-grade-block {
-      background: #f8fafc;
-      /* background-color: #eff6fe; */
-      border-radius: 10px;
-      padding-top: 10px;
-      padding-bottom: 5px;
-      /* BORDER: #d4e8ff 1px solid; */
-      border: 1px solid #e2e8f0;
+    .card-success-gradient {
+      background: linear-gradient(135deg, #f9fff7 0%, #f0fff0 100%) !important;
+      box-shadow: 0 4px 12px rgba(30, 138, 30, 0.10) !important;
     }
 
-    .title-grade-block {
-      text-transform: uppercase;
-      font-size: 15px;
-      margin-bottom: 10px;
-      font-weight: bold;
-      color: #2a5298;
-      padding-bottom: 5px;
+    .card-warning-yellow {
+      background: linear-gradient(135deg, #fffdf5 0%, #fff8e1 100%) !important;
+      box-shadow: 0 4px 12px rgba(181, 138, 0, 0.10) !important;
+    }
 
+    .card-info-shadow {
+      box-shadow: 0 4px 12px rgba(42, 82, 152, 0.10) !important;
+    }
+
+    .open-link:hover span {
+      text-decoration: underline !important;
     }
 
     .grade-cell {
-      padding-bottom: 0px;
-      font-size: 0px;
-      color: #eeeeee;
       text-align: center;
+      font-size: 12px;
+      color: #666666;
     }
 
     .grade-cell img {
-      text-align: center;
-      padding-bottom: 5px;
-    }
-
-    .grade-label {
-      font-size: 12px;
-      color: #666666;
       display: block;
-    }
-
-    /*ВСТАВКА IMG В HTMLDescription */
-
-    .WordSection1 {
-      width: 100%;
-      max-width: 600px;
-      margin: 0 auto;
-      overflow: hidden;
-    }
-
-    .step {
-      max-width: 100% !important;
-      height: auto !important;
-      display: block;
-      margin: 0 auto;
+      margin: 0 auto 5px;
       border: 0;
     }
 
-    /*ЗАГОЛОВОК В ШАПКЕ*/
+    @media only screen and (max-width: 660px) {
+      .content-wrapper {
+        width: 100% !important;
+      }
 
-    .title-td {
-      color: #ffffff;
-      padding: 15px 20px;
+      .main-td {
+        padding-left: 20px !important;
+        padding-right: 20px !important;
+      }
 
-    }
-
-    .title-div {
-      /* text-transform: uppercase; */
-      border-bottom: 1px solid #ffffff;
-      padding-bottom: 5px;
-      margin-bottom: 5px;
-      font-size: 16px;
-      font-weight: 600;
-    }
-
-    /*ТАБЛИЦЫ И ЯЧЕЙКИ БЛОКОВ*/
-
-    .card {
-      background: #f8fafc;
-      /* background-color: #eff6fe; */
-      font-size: 14px;
-      border-radius: 10px;
-      border: 1px solid #e2e8f0;
-      /*border: 1px solid #d4e8ff;*/
-    }
-
-    .card-green {
-
-      font-size: 13px;
-      background-color: #f9fff7;
-      /* background: #f8fafc; */
-      border-radius: 10px;
-      /*border: 1px solid #cffccf;*/
-      border: 1px solid #c3e2ca;
-    }
-
-    .card-header {
-      /* text-transform: uppercase; */
-      text-indent: 3px;
-      font-weight: 600;
-      font-size: 13px;
-      padding-left: 15px;
-      padding-right: 15px;
-      padding-top: 5px;
-
-
-    }
-
-    .card-body {
-      text-indent: 5px;
-      font-size: 13px;
-      padding-top: 10px;
-      padding-left: 15px;
-      padding-right: 15px;
-      color: #3f3f3f;
-    }
-
-    .card-bottom {
-      text-indent: 5px;
-      font-size: 13px;
-      margin-top: 0px;
-      padding-top: 8px;
-      padding-left: 15px;
-      padding-right: 15px;
-      padding-bottom: 11px;
-      color: #3f3f3f;
-    }
-
-    .card-bottom b,
-    .card-body b {
-      font-weight: 600;
-    }
-
-    .divider-blue {
-      font-size: 3px;
-      padding-bottom: 3px;
-      /*border-bottom: #444 1px dashed;*/
-      border-bottom: #b3d1ff 2px solid;
-    }
-
-    .divider-green {
-      font-size: 3px;
-      padding-bottom: 3px;
-      /*border-bottom: #444 1px dashed;*/
-      border-bottom: #c8e6c9 2px solid;
-    }
-
-    .divider-grey {
-      font-size: 3px;
-      padding-bottom: 3px;
-      /*border-bottom: #444 1px dashed;*/
-      border-bottom: #dadada 1px solid;
-    }
-
-    .sign {
-      padding-left: 10px;
-      font-size: 13px;
-      color: #2a5298;
-    }
-
-    .sign A {
-      text-decoration: underline;
-      color: #2a5298;
-    }
-
-    .bottom {
-      font-size: 12px;
-      border-top: #dddddd 1px solid;
-      color: #888888;
-      padding: 15px;
-      background-color: #f8f8f8;
-    }
-
-    .break {
-      font-size: 15px;
-    }
-
-    .pm,
-    .pm a,
-    .pm img {
-      margin: 0px;
-      padding: 0px;
-      font-size: 0px;
-      border: 0;
+      .title-td table td {
+        padding-left: 15px !important;
+        padding-right: 15px !important;
+      }
     }
   </STYLE>
+</HEAD>
 
-<META name=GENERATOR content="MSHTML 11.00.10570.1001"></HEAD>
-<BODY>
-<TABLE style="BACKGROUND-COLOR: #f5f5f5" cellSpacing=0 cellPadding=0 
-width="100%" border=0>
-  <TBODY>
-  <TR>
-    <TD 
-    style="PADDING-BOTTOM: 10px; PADDING-TOP: 10px; PADDING-LEFT: 10px; PADDING-RIGHT: 10px" 
-    vAlign=top align=center>
-      <TABLE role=presentation class=content-wrapper cellSpacing=0 cellPadding=0 
-      width=650 border=0>
-        <TBODY>
-        <TR>
-          <TD class=title-td style="BACKGROUND-COLOR: #2a5298">
-            <TABLE 
-            style="FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, sans-serif; COLOR: white" 
-            cellSpacing=0 cellPadding=0>
-              <TBODY>
+<BODY
+  STYLE="MARGIN: 0px; PADDING: 0px; WIDTH: 100%; BACKGROUND-COLOR: #f5f5f5; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+    STYLE="BACKGROUND-COLOR: #f5f5f5; BORDER-COLLAPSE: collapse" WIDTH="100%">
+    <TBODY>
+      <TR>
+        <TD ALIGN="center" STYLE="PADDING-BOTTOM: 10px; PADDING-TOP: 10px; PADDING-LEFT: 10px; PADDING-RIGHT: 10px"
+          VALIGN="top">
+          <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" CLASS="content-wrapper" ROLE="presentation"
+            STYLE="BORDER: #dddddd 1px solid; WIDTH: 650px; BACKGROUND-COLOR: #ffffff; BORDER-COLLAPSE: collapse; TEXT-ALIGN: left; BORDER-RADIUS: 5px; OVERFLOW: hidden"
+            WIDTH="650">
+            <TBODY>
               <TR>
-                <TD 
-                style="FONT-SIZE: 18px; FONT-WEIGHT: 600; PADDING-BOTTOM: 5px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
-                colSpan=2>Ваша заявка № {?Call.NumberString} выполнена! </TD></TR>
-              <TR>
-                <TD 
-                style="FONT-SIZE: 15px; FONT-WEIGHT: 400; PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
-                vAlign=middle width="1%" noWrap><SPAN 
-                  style="DISPLAY: block">Приоритет: 
-                  <B>{?Call.PriorityName}</B></SPAN></TD>
-                <TD 
-                style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 3px; MARGIN: 0px; PADDING-RIGHT: 0px" 
-                vAlign=bottom align=left><IMG 
-                  style="PADDING-TOP: 0px; MARGIN: 0px" alt="" 
-                  src="{?Call.WebServerAddress}/images/icons/{?Call.PriorityName}.png" 
-                  width=16 height=16> 
-                  <DIV 
-                  style="FONT-SIZE: 1px; LINE-HEIGHT: 1px; BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; BORDER-LEFT: 0px;
-                   MARGIN: 0px; PADDING-RIGHT: 0px" 
-                  valign="bottom">&nbsp;</DIV></TD></TR></TBODY></TABLE></TD></TR>
-        <TR>
-          <TD 
-          style="PADDING-BOTTOM: 10px; PADDING-TOP: 10px; PADDING-LEFT: 20px; PADDING-RIGHT: 20px"><!-- Кнопки в одной таблице в ряд -->
-            <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
-              <TBODY>
-              <TR>
-                <TD>
-                  <DIV class=break>&nbsp;</DIV><!------------------------- Карточка Заявка №  ------------------------------->
-                  <TABLE class="card card-call-info" 
-                  style="TEXT-DECORATION: none" cellSpacing=1 cellPadding=5 
-                  width="100%" border=0>
+                <TD BGCOLOR="#2a5298" CLASS="title-td title-gradient"
+                  STYLE="COLOR: #ffffff; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; BACKGROUND-COLOR: #2a5298; PADDING: 0px">
+                  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                    STYLE="FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, sans-serif; COLOR: #ffffff; BORDER-COLLAPSE: collapse"
+                    WIDTH="100%">
                     <TBODY>
-                    <TR><!-- иконка  -->
-                      <TD 
-                      style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 12px; PADDING-RIGHT: 0px" 
-                      vAlign=middle width=20 align=left><IMG 
-                        style="BORDER-LEFT-WIDTH: 0px; TEXT-DECORATION: none; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; DISPLAY: block; BORDER-TOP-WIDTH: 0px" 
-                        border=0 alt="" 
-                        src="{?Call.WebServerAddress}/images/icons/Call.png" 
-                        width=20 height=20> </TD><!-- Текст заявка №  -->
-                      <TD 
-                      style="FONT-SIZE: 16px; TEXT-DECORATION: none; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; WIDTH: 1%; WHITE-SPACE: nowrap; FONT-WEIGHT: 600" 
-                      vAlign=middle width="1%" noWrap align=left><A 
-                        style="BORDER-LEFT-WIDTH: 0px; CURSOR: pointer; TEXT-DECORATION: none; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; BORDER-TOP-WIDTH: 0px" 
-                        href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><SPAN 
-                        style="TEXT-DECORATION: none; COLOR: #2a5298">Заявка 
-                        №{?Call.NumberString}</SPAN></A></TD><!------------Иконка Состояние заявки ------------------>
-                      <TD style="PADDING-LEFT: 20px" width=1 noWrap><IMG 
-                        style="BORDER-LEFT-WIDTH: 0px; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; DISPLAY: block; BORDER-TOP-WIDTH: 0px" 
-                        border=0 alt="" 
-                        src="{?Call.WebServerAddress}/images/icons/{?Call.EntityStateName}.png" 
-                        width=22 height=22> </TD><!------------Текст Состояние заявки ------------------>
-                      <TD 
-                      style="FONT-SIZE: 14px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; COLOR: #2a5298; PADDING-LEFT: 0px" 
-                      vAlign=middle width="1%" noWrap 
-                        align=left>{?Call.EntityStateName} </TD><!-- Текст. Открыть  -->
-                      <TD 
-                      style="FONT-SIZE: 15px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 400; COLOR: #2a5298; PADDING-RIGHT: 2px" 
-                      width="100%" align=right><A 
-                        style="BORDER-LEFT-WIDTH: 0px; CURSOR: pointer; TEXT-DECORATION: none; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; BORDER-TOP-WIDTH: 0px" 
-                        href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><SPAN 
-                        style="TEXT-DECORATION: none; COLOR: #1a87e7">открыть</SPAN> 
+                      <TR>
+                        <TD
+                          STYLE="FONT-SIZE: 18px; FONT-WEIGHT: 600; PADDING-BOTTOM: 1px; PADDING-TOP: 10px; PADDING-LEFT: 20px; PADDING-RIGHT: 20px"
+                          VALIGN="top" WIDTH="85%">Ваша заявка № {?Call.NumberString} выполнена!</TD>
+                        <TD STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 7px; PADDING-LEFT: 0px; PADDING-RIGHT: 7px"
+                          VALIGN="top" WIDTH="15%" ALIGN="right"><IMG
+                            STYLE="BORDER-LEFT-WIDTH: 0px; BORDER-RIGHT-WIDTH: 0px; WIDTH: 50%; BORDER-BOTTOM-WIDTH: 0px; BORDER-TOP-WIDTH: 0px"
+                            BORDER="0" ALT="" SRC="https://helpdesk.stepcon.ru/images/icons/step_logo.png" WIDTH="50%">
+                        </TD>
+                      </TR>
+                      <TR>
+                        <TD STYLE="PADDING-BOTTOM: 14px; PADDING-TOP: 5px; PADDING-LEFT: 20px" COLSPAN="2">
+                          <TABLE STYLE="FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, sans-serif; COLOR: #ffffff"
+                            CELLSPACING="0" CELLPADDING="0" BORDER="0">
+                            <TBODY>
+                              <TR>
+                                <TD STYLE="FONT-SIZE: 15px; FONT-WEIGHT: 400; COLOR: #ffffff; PADDING-RIGHT: 5px"
+                                  NOWRAP>Приоритет: <B>{?Call.PriorityName}</B></TD>
+                                <TD STYLE="PADDING-LEFT: 0px; MARGIN: 0px" VALIGN="middle" ALIGN="left">
+                                  <DIV
+                                    STYLE="FONT-SIZE: 0px; BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; BORDER-LEFT: 0px; MARGIN: 0px; PADDING-RIGHT: 0px; BACKGROUND-COLOR: #2a5298">
+                                    &nbsp;</DIV><IMG
+                                    STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; MARGIN: 0px; DISPLAY: block; PADDING-RIGHT: 0px"
+                                    BORDER="0" ALT=""
+                                    SRC="{?Call.WebServerAddress}/images/icons/{?Call.PriorityName}.png" WIDTH="18"
+                                    HEIGHT="18">
+                                </TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                        </TD>
+                      </TR>
+                    </TBODY>
+                  </TABLE>
+                </TD>
+              </TR>
+              <TR>
+                <TD CLASS="main-td"
+                  STYLE="PADDING-BOTTOM: 10px; PADDING-TOP: 20px; PADDING-LEFT: 30px; PADDING-RIGHT: 30px">
+                  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                    STYLE="BORDER-COLLAPSE: collapse" WIDTH="100%">
+                    <TBODY>
+                      <TR>
+                        <TD>
+                          <TABLE BGCOLOR="#f8fafc" BORDER="0" CELLPADDING="5" CELLSPACING="1" CLASS="card-info-shadow"
+                            ROLE="presentation"
+                            STYLE="BACKGROUND-COLOR: #f8fafc; BORDER-RADIUS: 5px; BORDER: #e2e8f0 1px solid; FONT-SIZE: 14px; BORDER-COLLAPSE: separate; BORDER-SPACING: 1px; TEXT-DECORATION: none"
+                            WIDTH="100%">
+                            <TBODY>
+                              <TR>
+                                <TD
+                                  STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 12px; PADDING-RIGHT: 0px"
+                                  VALIGN="middle" WIDTH="20" ALIGN="left"><IMG STYLE="BORDER: 0px; DISPLAY: block"
+                                    BORDER="0" ALT="" SRC="{?Call.WebServerAddress}/images/icons/Call.png" WIDTH="20"
+                                    HEIGHT="20" /></TD>
+                                <TD
+                                  STYLE="FONT-SIZE: 16px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; WIDTH: 1%; WHITE-SPACE: nowrap; FONT-WEIGHT: 600"
+                                  VALIGN="middle" WIDTH="1%" NOWRAP ALIGN="left"><A
+                                    STYLE="CURSOR: pointer; TEXT-DECORATION: none; BORDER: 0px"
+                                    HREF="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><SPAN
+                                      STYLE="TEXT-DECORATION: none; COLOR: #2a5298">Заявка
+                                      №{?Call.NumberString}</SPAN></A></TD>
+                                <TD STYLE="PADDING-LEFT: 20px" WIDTH="1" NOWRAP><IMG STYLE="BORDER: 0px; DISPLAY: block"
+                                    BORDER="0" ALT=""
+                                    SRC="{?Call.WebServerAddress}/images/icons/{?Call.EntityStateName}.png" WIDTH="22"
+                                    HEIGHT="22" /></TD>
+                                <TD
+                                  STYLE="FONT-SIZE: 14px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; COLOR: #2a5298; PADDING-LEFT: 0px"
+                                  VALIGN="middle" WIDTH="1%" NOWRAP ALIGN="left">{?Call.EntityStateName}</TD>
+                                <TD
+                                  STYLE="FONT-SIZE: 15px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 400; COLOR: #1a87e7; PADDING-RIGHT: 2px"
+                                  WIDTH="100%" ALIGN="right"><A CLASS="open-link"
+                                    STYLE="CURSOR: pointer; TEXT-DECORATION: none; BORDER: 0px"
+                                    HREF="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><SPAN
+                                      STYLE="TEXT-DECORATION: none; COLOR: #1a87e7">открыть</SPAN></A></TD>
+                                <TD
+                                  STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 2px; PADDING-LEFT: 0px; PADDING-RIGHT: 10px"
+                                  ALIGN="right"><A STYLE="CURSOR: pointer; TEXT-DECORATION: none; BORDER: 0px"
+                                    HREF="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><IMG
+                                      STYLE="BORDER: 0px; DISPLAY: block" BORDER="0" ALT="Открыть заявку"
+                                      SRC="{?Call.WebServerAddress}/images/icons/forward.png" WIDTH="22"
+                                      HEIGHT="24" /></A></TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV STYLE="FONT-SIZE: 15px; LINE-HEIGHT: 15px">&nbsp;</DIV>
+                          <TABLE BGCOLOR="#f9fff7" BORDER="0" CELLPADDING="0" CELLSPACING="0"
+                            CLASS="card-success-gradient" ROLE="presentation"
+                            STYLE="BACKGROUND-COLOR: #f9fff7; BORDER-RADIUS: 5px; BORDER: #c3e2ca 1px solid; FONT-SIZE: 14px; BORDER-COLLAPSE: separate; BORDER-SPACING: 0px"
+                            WIDTH="100%">
+                            <TBODY>
+                              <TR>
+                                <TD STYLE="PADDING-TOP: 10px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                                    STYLE="BORDER-COLLAPSE: collapse" WIDTH="100%">
+                                    <TBODY>
+                                      <TR>
+                                        <TD
+                                          STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 10px"
+                                          VALIGN="middle" WIDTH="25" ALIGN="left"><IMG
+                                            STYLE="BORDER: 0px; DISPLAY: block" BORDER="0" ALT=""
+                                            SRC="{?Call.WebServerAddress}/images/icons/Решение.png" WIDTH="20"
+                                            HEIGHT="20" /></TD>
+                                        <TD
+                                          STYLE="TEXT-TRANSFORM: uppercase; TEXT-INDENT: 1px; FONT-WEIGHT: 600; FONT-SIZE: 14px; COLOR: #1e8a1e; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
+                                          VALIGN="middle" ALIGN="left">Решение</TD>
+                                      </TR>
+                                    </TBODY>
+                                  </TABLE>
+                                  <DIV STYLE="FONT-SIZE: 3px; PADDING-BOTTOM: 3px; BORDER-BOTTOM: #c8e6c9 2px solid">
+                                    &nbsp;</DIV>
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD
+                                  STYLE="TEXT-INDENT: 1px; FONT-SIZE: 14px; COLOR: #3f3f3f; LINE-HEIGHT: 1.4; PADDING-TOP: 10px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  {?Call.HTMLSolution}<DIV
+                                    STYLE="FONT-SIZE: 3px; PADDING-BOTTOM: 3px; BORDER-BOTTOM: #dadada 1px solid">&nbsp;
+                                  </DIV>
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD
+                                  STYLE="TEXT-INDENT: 1px; FONT-SIZE: 14px; COLOR: #3f3f3f; LINE-HEIGHT: 1.4; PADDING-TOP: 8px; PADDING-BOTTOM: 11px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <B>Заявку выполнил:</B> {?Call.AccomplisherFullName}</TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV STYLE="FONT-SIZE: 15px; LINE-HEIGHT: 15px">&nbsp;</DIV>
+                          <TABLE BGCOLOR="#f8fafc" BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                            STYLE="BACKGROUND-COLOR: #f8fafc; BORDER-RADIUS: 5px; BORDER: #e2e8f0 1px solid; FONT-SIZE: 14px; BORDER-COLLAPSE: separate; BORDER-SPACING: 0px"
+                            WIDTH="100%">
+                            <TBODY>
+                              <TR>
+                                <TD
+                                  STYLE="TEXT-TRANSFORM: uppercase; TEXT-INDENT: 1px; FONT-WEIGHT: 600; FONT-SIZE: 14px; COLOR: #2a5298; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; PADDING-TOP: 10px; PADDING-BOTTOM: 5px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  Оцените исполнение</TD>
+                              </TR>
+                              <TR>
+                                <TD
+                                  STYLE="FONT-SIZE: 16px; COLOR: #555555; TEXT-ALIGN: center; PADDING-BOTTOM: 10px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <U>Ваше</U> мнение очень важно для нас!</TD>
+                              </TR>
+                              <TR>
+                                <TD STYLE="PADDING-BOTTOM: 10px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                                    STYLE="BORDER-COLLAPSE: collapse" WIDTH="100%">
+                                    <TBODY>
+                                      <TR>
+                                        <TD CLASS="grade-cell" STYLE="TEXT-ALIGN: center" WIDTH="20%">{?Call.SetGrade[5-
+                                          <IMG SRC="{?Call.WebServerAddress}/images/5.png"
+                                            STYLE="BORDER: 0px; DISPLAY: block; MARGIN: 0px auto 5px" />;email={?Call.ClientEmail};]}<SPAN
+                                            STYLE="FONT-SIZE: 12px; COLOR: #666666">Отлично</SPAN></TD>
+                                        <TD CLASS="grade-cell" STYLE="TEXT-ALIGN: center" WIDTH="20%">{?Call.SetGrade[4-
+                                          <IMG SRC="{?Call.WebServerAddress}/images/4.png"
+                                            STYLE="BORDER: 0px; DISPLAY: block; MARGIN: 0px auto 5px" />;email={?Call.ClientEmail};]}<SPAN
+                                            STYLE="FONT-SIZE: 12px; COLOR: #666666">Хорошо</SPAN></TD>
+                                        <TD CLASS="grade-cell" STYLE="TEXT-ALIGN: center" WIDTH="20%">{?Call.SetGrade[3-
+                                          <IMG SRC="{?Call.WebServerAddress}/images/3.png"
+                                            STYLE="BORDER: 0px; DISPLAY: block; MARGIN: 0px auto 5px" />;email={?Call.ClientEmail};]}<SPAN
+                                            STYLE="FONT-SIZE: 12px; COLOR: #666666">Удовл.</SPAN></TD>
+                                        <TD CLASS="grade-cell" STYLE="TEXT-ALIGN: center" WIDTH="20%">{?Call.SetGrade[2-
+                                          <IMG SRC="{?Call.WebServerAddress}/images/2.png"
+                                            STYLE="BORDER: 0px; DISPLAY: block; MARGIN: 0px auto 5px" />;email={?Call.ClientEmail};]}<SPAN
+                                            STYLE="FONT-SIZE: 12px; COLOR: #666666">Плохо</SPAN></TD>
+                                        <TD CLASS="grade-cell" STYLE="TEXT-ALIGN: center" WIDTH="20%">{?Call.SetGrade[1-
+                                          <IMG SRC="{?Call.WebServerAddress}/images/1.png"
+                                            STYLE="BORDER: 0px; DISPLAY: block; MARGIN: 0px auto 5px" />;email={?Call.ClientEmail};]}<SPAN
+                                            STYLE="FONT-SIZE: 12px; COLOR: #666666">Ужасно</SPAN></TD>
+                                      </TR>
+                                    </TBODY>
+                                  </TABLE>
+                                </TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV STYLE="FONT-SIZE: 15px; LINE-HEIGHT: 15px">&nbsp;</DIV>
+                          <TABLE BGCOLOR="#f8fafc" BORDER="0" CELLPADDING="0" CELLSPACING="0" CLASS="card-info-shadow"
+                            ROLE="presentation"
+                            STYLE="BACKGROUND-COLOR: #f8fafc; BORDER-RADIUS: 5px; BORDER: #e2e8f0 1px solid; FONT-SIZE: 14px; BORDER-COLLAPSE: separate; BORDER-SPACING: 0px"
+                            WIDTH="100%">
+                            <TBODY>
+                              <TR>
+                                <TD STYLE="PADDING-TOP: 10px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                                    STYLE="BORDER-COLLAPSE: collapse" WIDTH="100%">
+                                    <TBODY>
+                                      <TR>
+                                        <TD
+                                          STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 10px"
+                                          VALIGN="middle" WIDTH="25" ALIGN="left"><IMG
+                                            STYLE="BORDER: 0px; DISPLAY: block" BORDER="0" ALT=""
+                                            SRC="{?Call.WebServerAddress}/images/icons/Title.png" WIDTH="20"
+                                            HEIGHT="20" /></TD>
+                                        <TD
+                                          STYLE="TEXT-INDENT: 1px; FONT-WEIGHT: 600; FONT-SIZE: 14px; COLOR: #2a5298; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
+                                          VALIGN="middle" ALIGN="left">{?Call.CallSummaryName}</TD>
+                                      </TR>
+                                    </TBODY>
+                                  </TABLE>
+                                  <DIV STYLE="FONT-SIZE: 3px; PADDING-BOTTOM: 3px; BORDER-BOTTOM: #b3d1ff 2px solid">
+                                    &nbsp;</DIV>
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD
+                                  STYLE="TEXT-INDENT: 1px; FONT-SIZE: 14px; COLOR: #3f3f3f; LINE-HEIGHT: 1.4; PADDING-TOP: 8px; PADDING-BOTTOM: 11px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  {?Call.HTMLDescription}</TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV STYLE="FONT-SIZE: 15px; LINE-HEIGHT: 15px">&nbsp;</DIV>
+                          <TABLE BGCOLOR="#f8fafc" BORDER="0" CELLPADDING="0" CELLSPACING="0" CLASS="card-info-shadow"
+                            ROLE="presentation"
+                            STYLE="BACKGROUND-COLOR: #f8fafc; BORDER-RADIUS: 5px; BORDER: #e2e8f0 1px solid; FONT-SIZE: 14px; BORDER-COLLAPSE: separate; BORDER-SPACING: 0px"
+                            WIDTH="100%">
+                            <TBODY>
+                              <TR>
+                                <TD STYLE="PADDING-TOP: 10px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <TABLE BORDER="0" CELLPADDING="0" CELLSPACING="0" ROLE="presentation"
+                                    STYLE="BORDER-COLLAPSE: collapse" WIDTH="100%">
+                                    <TBODY>
+                                      <TR>
+                                        <TD
+                                          STYLE="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 10px"
+                                          VALIGN="middle" WIDTH="25" ALIGN="left"><IMG
+                                            STYLE="BORDER: 0px; DISPLAY: block" BORDER="0" ALT=""
+                                            SRC="{?Call.WebServerAddress}/images/icons/Info.png" WIDTH="20"
+                                            HEIGHT="20" /></TD>
+                                        <TD
+                                          STYLE="TEXT-TRANSFORM: uppercase; TEXT-INDENT: 1px; FONT-WEIGHT: 600; FONT-SIZE: 14px; COLOR: #2a5298; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif"
+                                          VALIGN="middle" ALIGN="left">Дополнительная информация о заявке</TD>
+                                      </TR>
+                                    </TBODY>
+                                  </TABLE>
+                                  <DIV STYLE="FONT-SIZE: 3px; PADDING-BOTTOM: 3px; BORDER-BOTTOM: #b3d1ff 2px solid">
+                                    &nbsp;</DIV>
+                                </TD>
+                              </TR>
+                              <TR>
+                                <TD
+                                  STYLE="TEXT-INDENT: 1px; FONT-SIZE: 14px; COLOR: #3f3f3f; LINE-HEIGHT: 1.4; PADDING-TOP: 8px; PADDING-BOTTOM: 11px; PADDING-LEFT: 15px; PADDING-RIGHT: 15px">
+                                  <DIV STYLE="MARGIN-BOTTOM: 5px"><B>За заявку отвечал:</B> {?Call.OwnerFullName}</DIV>
+                                  <DIV STYLE="MARGIN-BOTTOM: 5px"><B>Должность:</B> {?Call.OwnerPositionName}</DIV>
+                                  <DIV STYLE="MARGIN-BOTTOM: 5px"><B>Заявка создана:</B> {?Call.DateRegisteredString}
+                                  </DIV>
+                                  <DIV STYLE="MARGIN-BOTTOM: 5px"><B>Заявка взята в работу:</B> {?Call.DateOpenedString}
+                                  </DIV>
+                                  <DIV STYLE="MARGIN-BOTTOM: 5px"><B>Заявка выполнена:</B>
+                                    {?Call.DateAccomplishedString}</DIV>
+                                </TD>
+                              </TR>
+                            </TBODY>
+                          </TABLE>
+                          <DIV STYLE="FONT-SIZE: 15px; LINE-HEIGHT: 15px">&nbsp;</DIV>
+                          <DIV CLASS="sign"
+                            STYLE="TEXT-ALIGN: center; PADDING-LEFT: 10px; FONT-SIZE: 13px; COLOR: #2a5298; LINE-HEIGHT: 1.4">
+                            <DIV STYLE="FONT-SIZE: 13px">Портал <A STYLE="COLOR: #2a5298; TEXT-DECORATION: underline"
+                                HREF="{?Call.WebServerAddress}">HelpDesk</A></DIV>
+                          </DIV>
+                        </TD>
+                      </TR>
+                    </TBODY>
+                  </TABLE>
+                </TD>
+              </TR>
+              <TR>
+                <TD ALIGN="center" BGCOLOR="#f8f8f8"
+                  STYLE="FONT-SIZE: 12px; BORDER-TOP: #dddddd 1px solid; COLOR: #888888; PADDING: 15px; BACKGROUND-COLOR: #f8f8f8; TEXT-ALIGN: center; BORDER-RADIUS: 0px 0px 5px 5px">
+                  <DIV>© 2026 Служба поддержки. Все права защищены.</DIV>
+                </TD>
+              </TR>
+            </TBODY>
+          </TABLE>
+        </TD>
+      </TR>
+    </TBODY>
+  </TABLE>
+</BODY>
 
-                        <DIV 
-                        style="FONT-SIZE: 1px; LINE-HEIGHT: 1px">&nbsp;</DIV></A></TD><!-- иконка перехода в заявку  -->
-                      <TD 
-                      style="PADDING-BOTTOM: 0px; PADDING-TOP: 2px; PADDING-LEFT: 0px; PADDING-RIGHT: 10px" 
-                      align=right><A 
-                        style="BORDER-LEFT-WIDTH: 0px; CURSOR: pointer; TEXT-DECORATION: none; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; BORDER-TOP-WIDTH: 0px" 
-                        href="{?Call.WebServerAddress}?callNumber={?Call.NumberString}"><IMG 
-                        style="BORDER-LEFT-WIDTH: 0px; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; DISPLAY: block; BORDER-TOP-WIDTH: 0px" 
-                        border=0 alt="Открыть заявку" 
-                        src="{?Call.WebServerAddress}/images/icons/forward.png" 
-                        width=22 height=24></A> </TD></TR></TBODY></TABLE></TD></TR>
-              <TR>
-                <TD>
-                  <DIV class=break>&nbsp;</DIV><!-- Решение -->
-                  <TABLE class=card-green cellSpacing=0 cellPadding=0 
-                  width="100%" border=0>
-                    <TBODY>
-                    <TR>
-                      <TD class=card-header style="COLOR: #1e8a1e">
-                        <TABLE cellSpacing=0 cellPadding=0 width="100%" 
-border=0>
-                          <TBODY>
-                          <TR><!-- Ячейка с иконкой -->
-                            <TD 
-                            style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
-                            vAlign=middle width=25 align=left><IMG 
-                              style="BORDER-LEFT-WIDTH: 0px; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; BORDER-TOP-WIDTH: 0px" 
-                              border=0 alt="" 
-                              src="{?Call.WebServerAddress}/images/icons/Решение.png" 
-                              width=20 height=20> </TD><!-- Ячейка с текстом -->
-                            <TD 
-                            style="FONT-SIZE: 15px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 600; COLOR: #1e8a1e" 
-                            vAlign=middle align=left>Решение </TD>
-                            <TD class=pm align=right></TD></TR></TBODY></TABLE>
-                        <DIV class=divider-green>&nbsp;</DIV></TD></TR>
-                    <TR>
-                      <TD class=card-body>{?Call.HTMLSolution} 
-                        <DIV class=divider-grey>&nbsp;</DIV></TD></TR>
-                    <TR>
-                      <TD class=card-bottom><B>Заявку выполнил:</B> 
-                        {?Call.AccomplisherFullName} </TD></TR></TBODY></TABLE>
-                  <DIV class=break>&nbsp;</DIV></TD></TR>
-              <TR><!-- Оценка исполнения -->
-                <TD class=td-grade-block 
-                style="PADDING-BOTTOM: 10px; TEXT-ALIGN: center; PADDING-TOP: 10px; PADDING-LEFT: 25px; PADDING-RIGHT: 25px; border-radius: 10px" 
-                align=center>
-                  <DIV class=title-grade-block>Оцените исполнение </DIV>
-                  <DIV style="FONT-SIZE: 16px; COLOR: #555555"><U>Ваше</U> 
-                  мнение очень важно для нас! </DIV><BR><!-- Оценки с картинками внутри плейсхолдеров -->
-                  <TABLE style="WIDTH: 100%" cellSpacing=0 cellPadding=0 
-                  width="100%" border=0>
-                    <TBODY>
-                    <TR>
-                      <TD class=grade-cell 
-                        style="MARGIN-BOTTOM: 5px">{?Call.SetGrade[5- <IMG 
-                        src="{?Call.WebServerAddress}/images/5.png  ">;email={?Call.ClientEmail};]} 
-                        <SPAN class=grade-label>Отлично</SPAN> </TD>
-                      <TD class=grade-cell 
-                        style="MARGIN-BOTTOM: 5px">{?Call.SetGrade[4- <IMG 
-                        src="{?Call.WebServerAddress}/images/4.png  ">;email={?Call.ClientEmail};]} 
-                        <SPAN class=grade-label>Хорошо</SPAN> </TD>
-                      <TD class=grade-cell 
-                        style="MARGIN-BOTTOM: 5px">{?Call.SetGrade[3- <IMG 
-                        src="{?Call.WebServerAddress}/images/3.png  ">;email={?Call.ClientEmail};]} 
-                        <SPAN class=grade-label>Удовл.</SPAN> </TD>
-                      <TD class=grade-cell 
-                        style="MARGIN-BOTTOM: 5px">{?Call.SetGrade[2- <IMG 
-                        src="{?Call.WebServerAddress}/images/2.png  ">;email={?Call.ClientEmail};]} 
-                        <SPAN class=grade-label>Плохо</SPAN> </TD>
-                      <TD class=grade-cell 
-                        style="MARGIN-BOTTOM: 5px">{?Call.SetGrade[1- <IMG 
-                        src="{?Call.WebServerAddress}/images/1.png  ">;email={?Call.ClientEmail};]} 
-                        <SPAN class=grade-label>Ужасно</SPAN> 
-                  </TD></TR></TBODY></TABLE></TD></TR>
-              <TR>
-                <TD>
-                  <DIV class=break>&nbsp;</DIV><!-- Заявка -->
-                  <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" 
-                  border=0>
-                    <TBODY>
-                    <TR>
-                      <TD class=card-header style="COLOR: #2a5298"><!-- СТРОКА С ИКОНКОЙ  --->
-                        <TABLE cellSpacing=0 cellPadding=0 width="100%" 
-border=0>
-                          <TBODY>
-                          <TR>
-                            <TD 
-                            style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
-                            vAlign=middle width=25 align=left><IMG 
-                              style="BORDER-TOP: 0px; BORDER-RIGHT: 0px; BORDER-BOTTOM: 0px; BORDER-LEFT: 0px; DISPLAY: block" 
-                              border=0 alt="" 
-                              src="{?Call.WebServerAddress}/images/icons/Title.png" 
-                              width=20 height=20> </TD>
-                            <TD 
-                            style="FONT-SIZE: 14px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 500; COLOR: #2a5298" 
-                            vAlign=middle 
-                          align=left>{?Call.CallSummaryName}</TD></TR></TBODY></TABLE>
-                        <DIV class=divider-blue>&nbsp;</DIV></TD></TR>
-                    <TR></TR>
-                    <TR>
-                      <TD 
-                    class=card-bottom>{?Call.HTMLDescription}</TD></TR></TBODY></TABLE>
-                  <DIV class=break>&nbsp;</DIV><!-- Дополнительная информация -->
-                  <TABLE class=card cellSpacing=0 cellPadding=0 width="100%" 
-                  border=0>
-                    <TBODY>
-                    <TR>
-                      <TD class=card-header style="COLOR: #2a5298">
-                        <TABLE cellSpacing=0 cellPadding=0 width="100%" 
-border=0>
-                          <TBODY>
-                          <TR>
-                            <TD 
-                            style="PADDING-BOTTOM: 0px; PADDING-TOP: 0px; PADDING-LEFT: 0px; PADDING-RIGHT: 0px" 
-                            vAlign=middle width=25 align=left><IMG 
-                              style="BORDER-LEFT-WIDTH: 0px; BORDER-RIGHT-WIDTH: 0px; BORDER-BOTTOM-WIDTH: 0px; DISPLAY: block; BORDER-TOP-WIDTH: 0px" 
-                              border=0 alt="" 
-                              src="{?Call.WebServerAddress}/images/icons/info.png" 
-                              width=20 height=20> </TD>
-                            <TD 
-                            style="FONT-SIZE: 15px; FONT-FAMILY: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; FONT-WEIGHT: 600; COLOR: #2a5298" 
-                            vAlign=middle align=left>Дополнительная информация 
-                              о заявке </TD></TR></TBODY></TABLE>
-                        <DIV class=divider-blue>&nbsp;</DIV></TD></TR>
-                    <TR>
-                      <TD class=card-bottom>
-                        <DIV style="MARGIN-BOTTOM: 5px; MARGIN-TOP: 0px"><B>За 
-                        заявку отвечал:</B> {?Call.OwnerFullName} </DIV>
-                        <DIV style="MARGIN-BOTTOM: 5px"><B>Должность:</B> 
-                        {?Call.OwnerPositionName} </DIV>
-                        <DIV style="MARGIN-BOTTOM: 5px"><B>Заявка создана: 
-                        </B>{?Call.DateRegisteredString} </DIV>
-                        <DIV style="MARGIN-BOTTOM: 5px"><B>Заявка взята в 
-                        работу:</B> {?Call.DateOpenedString} </DIV>
-                        <DIV style="MARGIN-BOTTOM: 5px"><B>Заявка выполнена:</B> 
-                        {?Call.DateAccomplishedString} 
-</DIV></TD></TR></TBODY></TABLE>
-                  <DIV class=break>&nbsp;</DIV>
-                  <TABLE cellSpacing=0 cellPadding=0 width="100%" border=0>
-                    <TBODY>
-                    <TR>
-                      <TD class=pm align=center><A 
-                        href="mailto:HelpDesk@stepcon.ru?subject=Восстановление%20работ%20по%20заявке%20IM-CL-28974%20Действие:#Восстановить&amp;body=Комментарий:"><IMG 
-                        src="{?Call.WebServerAddress}/images/button_recover.png "> 
-                        </A></TD></TR></TBODY></TABLE>
-                  <DIV class=break>&nbsp;</DIV>
-                  <DIV class=break>&nbsp;</DIV><!-- Подпись -->
-                  <DIV class=sign>
-                  <DIV>С уважением, <BR>Служба ИТ поддержки.</DIV><BR>
-                  <DIV>Также вы можете обратиться в службу поддержки через <A 
-                  href="{?Call.WebServerAddress}">веб-интерфейс</A>. 
-                </DIV></DIV></TD></TR></TBODY></TABLE></TD></TR><!-- Подвал -->
-        <TR>
-          <TD class=bottom align=center>
-            <DIV>© 2026 Служба поддержки. Все права 
-      защищены.</DIV></TD></TR></TBODY></TABLE></TD></TR></TBODY></TABLE></BODY></HTML>
+</HTML>

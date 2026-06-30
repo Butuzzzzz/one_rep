@@ -1,0 +1,4076 @@
+﻿Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# ==== Полностью скрыть консоль PowerShell ===
+if ($Host.Name -eq 'ConsoleHost') {
+  Add-Type -Name Window -Namespace Console -MemberDefinition '
+    [DllImport("Kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, Int32 nCmdShow);
+    '
+  $consolePtr = [Console.Window]::GetConsoleWindow()
+  # 0 = hide, 5 = show
+  [Console.Window]::ShowWindow($consolePtr, 0)
+}
+
+# === ЦЕНТРАЛЬНАЯ КОНФИГУРАЦИЯ ===
+$script:Config = @{
+    Domain                = "stepcon.ru"
+    EmailDomain           = "stepcon.ru"
+
+    # Серверы
+    ExchangeServer        = $script:Config.ExchangeServer
+    SfBServer             = $script:Config.SfBServer
+    FSRMServer            = $script:Config.FSRMServer
+    PreferredDCs          = @("spbhdqsrv008.stepcon.ru", "spbhdqsrv038.stepcon.ru")
+
+    # Пути
+    UserFolderBasePath    = "\\stepcon.ru\users\Current"
+    UserObmenFolderPath   = "\\stepcon.ru\users\Current\!OBMEN"
+    UpdateLogFolder       = "\\stepcon.ru\office\ИТ\13\Update"
+    FsrmQuotaPath         = $script:Config.FsrmQuotaPath
+
+    # OU
+    UsersOUBase           = $script:Config.UsersOUBase
+    AccessGroupsOU        = $script:Config.AccessGroupsOU
+
+    # Exchange
+    MailboxDatabases      = $script:Config.MailboxDatabases
+
+    # FSRM
+    DefaultQuotaSize      = "10GB"
+    DefaultQuotaDescription = "10 GB for Users"
+
+    # Пароль по умолчанию
+    DefaultPassword       = $script:Config.DefaultPassword
+}
+
+# === НАСТРОЙКА КОНТРОЛЛЕРОВ ДОМЕНА ===
+$PreferredDCs = $script:Config.PreferredDCs
+$TargetDC = $null
+
+Write-Host "🔍 Поиск доступного контроллера домена..." -ForegroundColor Cyan
+
+foreach ($DC in $PreferredDCs) {
+    if (Test-Connection -ComputerName $DC -Count 1 -Quiet) {
+        $TargetDC = $DC
+        Write-Host "✅ Выбран контроллер домена: $TargetDC" -ForegroundColor Green
+        break
+    }
+}
+
+if ($TargetDC) {
+    # Магия PowerShell: заставляем ВСЕ команды модуля AD использовать этот сервер
+    $PSDefaultParameterValues["*-AD*:Server"] = $TargetDC
+} else {
+    Write-Host "❌ ВНИМАНИЕ: Ни один из предпочтительных DC недоступен!" -ForegroundColor Red
+}
+
+
+# === ФОНОВАЯ ИНИЦИАЛИЗАЦИЯ СЕРВИСОВ ===
+$script:exchangeConnected = $false
+$script:exchangeInitialized = $false
+$script:SfBConnected = $false
+$script:SfBInitialized = $false
+
+# Включение подробного отображения ошибок
+$ErrorActionPreference = "Continue"
+$ErrorView = "NormalView"
+
+# === ФУНКЦИЯ ДЛЯ ЗАПИСИ В ЛОГ ===
+function Write-Log {
+    param (
+        [string]$Message,
+        [switch]$UpdateProgress
+    )
+    
+    # 1. Запись в окно программы (с датой и иконками)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logBox.AppendText("[$timestamp] $Message`r`n")
+    $logBox.ScrollToCaret()
+
+    # 2. Запись в файл (БЕЗ даты и БЕЗ иконок)
+    if ($script:UpdateLogFilePath) {
+        # Убираем все возможные эмодзи, чтобы они не превращались в вопросы
+        $cleanFileMessage = $Message -replace "🔄|✅|❌|⚠️|🔍|⏳|🎲|📊|🔑|🚀|💡|💤|📝|ℹ️", ""
+        $cleanFileMessage = $cleanFileMessage.Trim()
+        
+        # Записываем чистый текст (добавлен параметр -Encoding UTF8 для надежности)
+        try { Add-Content -Path $script:UpdateLogFilePath -Value $cleanFileMessage -Encoding UTF8 -ErrorAction SilentlyContinue } catch {}
+    }
+
+   # Автоматически обновляем прогресс для сообщений с ключевыми словами
+  if ($UpdateProgress -or 
+    $Message -match "ошибка|error|❌" -or 
+    $Message -match "успех|success|✅" -or
+    $Message -match "создан|created|обновлен|updated" -or
+    $Message -match "поиск|search|🔍") {
+        
+    # Убираем эмодзи для прогресс-бара
+    $progressMessage = $Message -replace "🔄|✅|❌|⚠️|🔍|⏳|🎲|📊|🔑|🚀|💡|💤", ""
+    $progressMessage = $progressMessage.Trim()
+        
+    # Определяем цвет по содержанию
+    $color = "Black"
+    $bgColor = "LightGray"
+        
+    if ($Message -match "❌|ошибка|error") {
+      $color = "Red"
+      $bgColor = "LightRed"
+    }
+    elseif ($Message -match "✅|успех|success") {
+      $color = "Green" 
+      $bgColor = "LightGreen"
+    }
+    elseif ($Message -match "⚠️|предупреждение|warning") {
+      $color = "Yellow"
+      $bgColor = "LightYellow"
+    }
+        
+    Update-Progress -Message $progressMessage -Color $color -BackgroundColor $bgColor
+  }
+}
+
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДИАЛОГОВ ===
+function Show-ErrorDialog {
+    param([string]$Message, [string]$Title = "Ошибка")
+    [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+}
+
+function Show-InfoDialog {
+    param([string]$Message, [string]$Title = "Информация")
+    [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+}
+
+function Show-ConfirmDialog {
+    param([string]$Message, [string]$Title = "Подтверждение", [System.Windows.Forms.MessageBoxIcon]$Icon = [System.Windows.Forms.MessageBoxIcon]::Question)
+    $result = [System.Windows.Forms.MessageBox]::Show($Message, $Title, [System.Windows.Forms.MessageBoxButtons]::YesNo, $Icon)
+    return ($result -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+
+# === ОЖИДАНИЕ РЕПЛИКАЦИИ AD ===
+function Wait-ADReplication {
+    param(
+        [int]$Seconds = 5,
+        [string]$Message = "Ожидание репликации AD",
+        [switch]$UpdateProgress
+    )
+    Write-Log "⏳ $Message ($Seconds секунд)..."
+    if ($UpdateProgress) {
+        Update-Progress -Message " $Message ($Seconds секунд)..." -Color "Black" -BackgroundColor "Yellow"
+    }
+    Start-Sleep -Seconds $Seconds
+}
+
+# === ЕДИНЫЙ ФОРМАТ ЛОГИРОВАНИЯ ИСКЛЮЧЕНИЙ ===
+function Write-ErrorLog {
+    param(
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [string]$ContextMessage = "",
+        [switch]$Detailed
+    )
+    if ($ContextMessage) {
+        Write-Log "❌ $ContextMessage`: $($ErrorRecord.Exception.Message)"
+    }
+    else {
+        Write-Log "❌ Ошибка: $($ErrorRecord.Exception.Message)"
+    }
+    if ($Detailed) {
+        Write-Log "   - Тип: $($ErrorRecord.Exception.GetType().FullName)"
+        Write-Log "   - Строка: $($ErrorRecord.InvocationInfo.ScriptLineNumber)"
+        Write-Log "   - Команда: $($ErrorRecord.InvocationInfo.Line)"
+        if ($ErrorRecord.Exception.StackTrace) {
+            Write-Log "   - Stack Trace: $($ErrorRecord.Exception.StackTrace)"
+        }
+    }
+}
+
+# === РАЗРЕШЕНИЕ DISPLAYNAME РУКОВОДИТЕЛЯ В SAMACCOUNTNAME ===
+function Get-ManagerSamAccountName {
+    param([string]$DisplayName)
+    if ([string]::IsNullOrWhiteSpace($DisplayName)) { return $null }
+    $selectedManager = $script:managers | Where-Object { $_.DisplayName -eq $DisplayName } | Select-Object -First 1
+    if ($selectedManager) {
+        return $selectedManager.Name
+    }
+    return $null
+}
+
+# === ПУТИ К ПАПКАМ ПОЛЬЗОВАТЕЛЯ ===
+function Get-UserFolderPaths {
+    param([string]$FirstName, [string]$LastName)
+    $folderName = "$LastName $FirstName"
+    return @{
+        FolderName      = $folderName
+        UserFolder      = "$($script:Config.UserFolderBasePath)\$folderName"
+        ObmenFolder     = "$($script:Config.UserObmenFolderPath)\$folderName"
+        QuotaTargetPath = "$($script:Config.FsrmQuotaPath)\$folderName"
+    }
+}
+
+# === ИМЕНА ГРУПП ДОСТУПА ПОЛЬЗОВАТЕЛЯ ===
+function Get-UserGroupNames {
+    param([string]$FirstName, [string]$LastName)
+    $baseName = "U--$LastName $FirstName"
+    return @{
+        RO = "$baseName (RO)"
+        RW = "$baseName (RW)"
+    }
+}
+
+# === ФУНКЦИЯ ДЛЯ ПЕРЕНОСА DESCRIPTION В NOTES (ЗАМЕТКИ) ===
+# Добавлена для режима "один и тот же пользователь"
+# Переносит содержимое Description в Notes со сдвигом истории вниз
+
+function Update-UserNotes {
+  param(
+    [string]$Login,
+    [string]$NewDateDescription
+  )
+  
+  try {
+    Write-Log "🔍 Обновление заметок пользователя: $Login"
+    
+    # Получаем текущие значения Description и Notes из AD
+    $existingUser = Get-ADUser -Identity $Login -Properties Info, Description -ErrorAction SilentlyContinue
+    
+    if (-not $existingUser) {
+      Write-Log "❌ Пользователь не найден: $Login"
+      return $false
+    }
+    
+    $currentNotes = $existingUser.Info
+    $currentDescription = $existingUser.Description
+    
+    Write-Log "📝 Текущее Description: '$currentDescription'"
+    Write-Log "📝 Текущие Notes: '$currentNotes'"
+    
+    # Если Description содержит текст, переносим его в Notes
+    if (-not [string]::IsNullOrWhiteSpace($currentDescription)) {
+      Write-Log "🔄 Перенос Description в Notes..."
+      
+      # Новое содержимое Notes - переносим Description в начало
+      $newNotes = $currentDescription
+      
+      # Если Notes уже содержат текст, добавляем старые заметки на новую строку ниже
+      if (-not [string]::IsNullOrWhiteSpace($currentNotes)) {
+        Write-Log "✅ Заметки уже содержат текст, добавляем новую строку с разделением"
+        $newNotes = "$currentDescription`r`n$currentNotes"
+      }
+      
+      # Обновляем поле Notes (Info в AD)
+      Set-ADUser -Identity $Login -Replace @{info=$newNotes} -ErrorAction Stop -WarningAction SilentlyContinue
+      Write-Log "✅ Заметки обновлены: переношено Description '$currentDescription'"
+    }
+    else {
+      Write-Log "ℹ️  Description пусто, заметки не обновляются"
+    }
+    
+    # Обновляем Description новой датой приема
+    if (-not [string]::IsNullOrWhiteSpace($NewDateDescription)) {
+      Set-ADUser -Identity $Login -Description $NewDateDescription -ErrorAction Stop
+      Write-Log "✅ Description обновлено на: $NewDateDescription"
+    }
+    
+    return $true
+    
+  }
+  catch {
+    Write-Log "❌ Ошибка при обновлении Notes: $($_.Exception.Message)"
+    return $false
+  }
+}
+
+
+# === ТЕКСТОВЫЙ ПРОГРЕСС-БАР ===
+$progressLabel = New-Object System.Windows.Forms.Label
+$progressLabel.Location = New-Object System.Drawing.Point(15, 620)
+$progressLabel.Size = New-Object System.Drawing.Size(845, 20)
+$progressLabel.Text = "Готов к работе"
+$progressLabel.TextAlign = "MiddleCenter"
+$progressLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$progressLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 120, 215)
+$progressLabel.BackColor = [System.Drawing.Color]::FromArgb(240, 240, 240)
+$progressLabel.BorderStyle = "FixedSingle"
+
+# === ЧИСТАЯ ФУНКЦИЯ ПРОГРЕСС-БАРА БЕЗ ИКОНОК ===
+function Update-Progress {
+  param(
+    [string]$Message,
+    [string]$Color = "Blue",
+    [string]$BackgroundColor = "LightGray"
+  )
+    
+  # УБИРАЕМ ВСЕ ЭМОДЗИ И СИМВОЛЫ
+  $cleanMessage = $Message -replace "🔄", "" `
+    -replace "✅", "" `
+    -replace "❌", "" `
+    -replace "⚠️", "" `
+    -replace "🔍", "" `
+    -replace "⏳", "" `
+    -replace "🎲", "" `
+    -replace "📊", "" `
+    -replace "🔑", "" `
+    -replace "🚀", "" `
+    -replace "💡", "" `
+    -replace "💤", ""
+    
+  # УБИРАЕМ ЛИШНИЕ ПРОБЕЛЫ
+  $cleanMessage = $cleanMessage.Trim()
+    
+  $colorMap = @{
+    "Blue"   = [System.Drawing.Color]::FromArgb(0, 120, 215)
+    "Green"  = [System.Drawing.Color]::FromArgb(40, 167, 69) 
+    "Yellow" = [System.Drawing.Color]::FromArgb(133, 100, 4)
+    "Red"    = [System.Drawing.Color]::FromArgb(220, 53, 69)
+    "Gray"   = [System.Drawing.Color]::FromArgb(108, 117, 125)
+    "White"  = [System.Drawing.Color]::White
+    "Black"  = [System.Drawing.Color]::Black
+  }
+    
+  $bgColorMap = @{
+    "LightGray"   = [System.Drawing.Color]::FromArgb(240, 240, 240)
+    "White"       = [System.Drawing.Color]::White
+    "LightGreen"  = [System.Drawing.Color]::FromArgb(220, 255, 220)
+    "LightYellow" = [System.Drawing.Color]::FromArgb(255, 255, 200)
+    "LightRed"    = [System.Drawing.Color]::FromArgb(255, 220, 220)
+    "LightBlue"   = [System.Drawing.Color]::FromArgb(220, 230, 255)
+    "Yellow"      = [System.Drawing.Color]::FromArgb(255, 243, 205)
+  }
+    
+  $progressLabel.Text = $cleanMessage
+  $progressLabel.ForeColor = $colorMap[$Color]
+  $progressLabel.BackColor = $bgColorMap[$BackgroundColor]
+    
+  $progressLabel.Refresh()
+  [System.Windows.Forms.Application]::DoEvents()
+}
+
+# Также добавьте эту функцию для детального отображения ошибок
+function Show-DetailedError {
+  param($ErrorRecord)
+    
+  Write-Host "=== ДЕТАЛЬНАЯ ИНФОРМАЦИЯ ОБ ОШИБКЕ ===" -ForegroundColor Red
+  Write-Host "Сообщение: $($ErrorRecord.Exception.Message)" -ForegroundColor Red
+  Write-Host "Тип исключения: $($ErrorRecord.Exception.GetType().FullName)" -ForegroundColor Red
+  Write-Host "Строка: $($ErrorRecord.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
+  Write-Host "Позиция: $($ErrorRecord.InvocationInfo.OffsetInLine)" -ForegroundColor Red
+  Write-Host "Команда: $($ErrorRecord.InvocationInfo.Line)" -ForegroundColor Red
+  Write-Host "Stack Trace:" -ForegroundColor Red
+  Write-Host $ErrorRecord.ScriptStackTrace -ForegroundColor Red
+  Write-Host "=====================================" -ForegroundColor Red
+}
+
+# === ПРОСТАЯ ПРОВЕРКА SfB ===
+function Test-SfBConnection {
+  try {
+    Get-CsUser -Identity "krbtgt" -ErrorAction SilentlyContinue
+    return $true
+  }
+  catch {
+    return $false
+  }
+}
+
+function Initialize-SfBIfNeeded {
+    if (-not $script:SfBInitialized) {
+        # Просто вызываем нашу новую умную функцию подключения
+        if (Connect-SfBServer) {
+            $script:SfBInitialized = $true
+            return $true
+        } else {
+            return $false
+        }
+    }
+    return $script:SfBConnected
+}
+
+
+# Функция закрытия всех сессий
+function Close-AllSessions {
+  try {
+    Write-Log "🔄 Закрытие всех открытых сессий..."
+        
+    # Закрываем сессии Exchange
+    $exchangeSessions = Get-PSSession | Where-Object { 
+      $_.ConfigurationName -eq "Microsoft.Exchange" -or 
+      $_.ComputerName -like "*exchange*" -or
+      $_.ComputerName -eq "spbhdqsrv073"
+    }
+    if ($exchangeSessions) {
+      foreach ($session in $exchangeSessions) {
+        try {
+          Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+          Write-Log "✅ Закрыта сессия Exchange: $($session.ComputerName)"
+        }
+        catch {
+          Write-Log "⚠️ Ошибка закрытия сессии Exchange: $($_.Exception.Message)"
+        }
+      }
+    }
+        
+    # Закрываем сессии Skype for Business
+    $sfbSessions = Get-PSSession | Where-Object { 
+      $_.ComputerName -like "*$SfBServer*" -or 
+      $_.ConnectionUri -like "*$SfBServer*" 
+    }
+    if ($sfbSessions) {
+      foreach ($session in $sfbSessions) {
+        try {
+          Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+          Write-Log "✅ Закрыта сессия SfB: $($session.ComputerName)"
+        }
+        catch {
+          Write-Log "⚠️ Ошибка закрытия сессии SfB: $($_.Exception.Message)"
+        }
+      }
+      $script:SfBSession = $null
+      $script:SfBConnected = $false
+    }
+        
+    # Закрываем фоновые задания
+    Get-Job -ErrorAction SilentlyContinue | Remove-Job -Force -ErrorAction SilentlyContinue
+    Write-Log "✅ Фоновые задания очищены"
+
+    # Закрываем CimSession для квот
+    $cimSessions = Get-CimSession -ErrorAction SilentlyContinue
+    if ($cimSessions) {
+      foreach ($session in $cimSessions) {
+        try {
+          Remove-CimSession -CimSession $session -ErrorAction SilentlyContinue
+          Write-Log "✅ Закрыта CimSession: $($session.ComputerName)"
+        }
+        catch {
+          Write-Log "⚠️ Ошибка закрытия CimSession: $($_.Exception.Message)"
+        }
+      }
+    }
+        
+    Write-Log "✅ Все сессии закрыты"
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при закрытии сессий: $($_.Exception.Message)"
+  }
+}
+
+# Функция для безопасного создания CimSession для квот
+function New-SafeCimSession {
+  param([string]$ComputerName = $script:Config.FSRMServer)
+    
+  try {
+    # Сначала закрываем старые сессии к этому компьютеру
+    $oldSessions = Get-CimSession | Where-Object { $_.ComputerName -eq $ComputerName }
+    foreach ($session in $oldSessions) {
+      Remove-CimSession -CimSession $session -ErrorAction SilentlyContinue
+    }
+        
+    # Создаем новую сессию
+    $session = New-CimSession -ComputerName $ComputerName -ErrorAction Stop
+    Write-Log "✅ CimSession создана: $ComputerName"
+    return $session
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка создания CimSession: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+# Функция проверки и восстановления сессий
+function Test-AndRestoreSessions {
+  try {
+    # Проверяем сессию Exchange
+    $exchangeActive = $false
+    try {
+      if (Get-Command Get-Mailbox -ErrorAction SilentlyContinue -WarningAction SilentlyContinue) {
+        $null = Get-Mailbox -ResultSize 1 -ErrorAction Stop
+        $exchangeActive = $true
+        Write-Log "✅ Сессия Exchange активна"
+      }
+    }
+    catch {
+      Write-Log "⚠️ Сессия Exchange неактивна, пытаемся восстановить..."
+      $script:exchangeConnected = $false
+      Connect-Exchange
+    }
+        
+    # Проверяем сессию Skype for Business
+    $sfbActive = $false
+    if ($script:SfBSession -and $script:SfBConnected) {
+      try {
+        $null = Get-CsUser -ResultSize 1 -ErrorAction Stop
+        $sfbActive = $true
+        Write-Log "✅ Сессия SfB активна"
+      }
+      catch {
+        Write-Log "⚠️ Сессия SfB неактивна, пытаемся восстановить..."
+        $script:SfBConnected = $false
+        Connect-SfBServer
+      }
+    }
+        
+    return @{
+      ExchangeActive = $exchangeActive
+      SfBActive      = $sfbActive
+    }
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка проверки сессий: $($_.Exception.Message)"
+    return @{
+      ExchangeActive = $false
+      SfBActive      = $false
+    }
+  }
+}
+
+# === ЕДИНАЯ ФУНКЦИЯ ПОДКЛЮЧЕНИЯ К EXCHANGE ===
+function Connect-Exchange {
+    param([string]$ServerName = $script:Config.ExchangeServer)
+    Write-Log "EXCHANGE: Инициализация подключения..."
+
+    # Путь к папке модулей относительно скрипта (C:\temp\PSModules\RemoteExchange)
+    $ModulePath = Join-Path $PSScriptRoot "PSModules\RemoteExchange"
+    
+    # Флаг, чтобы понять, удалось ли подключиться через кэш
+    $connectedViaCache = $false
+
+    # --- ПОПЫТКА 1: ЛОКАЛЬНЫЙ МОДУЛЬ ---
+    if (Test-Path $ModulePath) {
+        try {
+            Write-Log "EXCHANGE: Обнаружен локальный модуль. Попытка быстрой загрузки..."
+            
+            # Удаляем модуль, если он вдруг завис в памяти с прошлого раза
+            Remove-Module RemoteExchange -ErrorAction SilentlyContinue
+            
+            # Импортируем и подавляем вывод!
+            Import-Module $ModulePath -DisableNameChecking -ErrorAction Stop | Out-Null
+            
+            # "Пинг" сервера - реальная проверка связи
+            # Если это упадет, мы перейдем в блок catch и попробуем "старый" метод
+            $null = Get-Mailbox -ResultSize 1 -ErrorAction Stop
+            
+            $connectedViaCache = $true
+            $script:exchangeConnected = $true
+            Write-Log "EXCHANGE: Успешно подключено (Fast Mode)"
+            return $true
+        }
+        catch {
+            Write-Log "EXCHANGE: Не удалось использовать кэш ($($_.Exception.Message)). Переход к прямому подключению..."
+            Remove-Module RemoteExchange -ErrorAction SilentlyContinue
+        }
+    } else {
+        Write-Log "EXCHANGE: Локальный модуль не найден ($ModulePath). Исползуем прямое подключение."
+    }
+
+    # --- ПОПЫТКА 2: ПРЯМОЕ ПОДКЛЮЧЕНИЕ (ЕСЛИ КЭШ НЕ СРАБОТАЛ) ---
+    if (-not $connectedViaCache) {
+        try {
+            Write-Log "EXCHANGE: Создание удаленной сессии (Legacy Mode)..."
+            
+            $serverName = $ServerName
+            $uri = "http://$serverName/PowerShell/"
+            
+            $session = New-PSSession -ConfigurationName Microsoft.Exchange `
+                                     -ConnectionUri $uri `
+                                     -Authentication Kerberos `
+                                     -AllowRedirection `
+                                     -ErrorAction Stop
+            
+            # Импортируем и ОБЯЗАТЕЛЬНО подавляем вывод | Out-Null
+            Import-PSSession $session -DisableNameChecking -AllowClobber -ErrorAction Stop | Out-Null
+            
+            $script:exchangeConnected = $true
+            Write-Log "EXCHANGE: Успешно подключено (Direct Session)"
+            return $true
+        }
+        catch {
+            Write-Log "EXCHANGE: КРИТИЧЕСКАЯ ОШИБКА ПОДКЛЮЧЕНИЯ: $($_.Exception.Message)"
+            $script:exchangeConnected = $false
+            return $false
+        }
+    }
+}
+
+
+
+function Enable-ExchangeMailbox {
+  param([string]$UserLogin)
+    
+  if (-not (Connect-Exchange)) {
+    Write-Log "⚠️ Создание почтового ящика пропущено (Exchange не подключен)"
+    return @{ Success = $false; Database = "N/A" }
+  }
+    
+  try {
+    Write-Log "🔍 Проверка почтового ящика для: $UserLogin"
+        
+    $mailbox = $null
+    try {
+      $mailbox = Get-Mailbox -Identity $UserLogin -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+    }
+    catch {
+      # Почтовый ящик не найден - это нормально
+    }
+
+    if ($mailbox) {
+      Write-Log "✅ Почтовый ящик уже существует"
+      try {
+        Set-Mailbox -Identity $UserLogin -HiddenFromAddressListsEnabled:$false -WarningAction SilentlyContinue
+        Write-Log "✅ Отображается в адресной книге"
+        return @{ Success = $true; Database = "Существующий" }  # <--- ИЗМЕНИЛИ
+      }
+      catch {
+        Write-Log "⚠️ Ошибка настройки почтового ящика: $($_.Exception.Message)"
+        return @{ Success = $false; Database = "Ошибка" }  # <--- ИЗМЕНИЛИ
+      }
+    }
+    else {
+      $mailboxDatabase = Get-RandomMailboxDatabase
+      Write-Log "🔄 Создание почтового ящика в базе: $mailboxDatabase"
+            
+      try {
+        Enable-Mailbox -Identity $UserLogin -Database $mailboxDatabase -ErrorAction Stop | Out-Null
+Set-Mailbox -Identity $UserLogin -HiddenFromAddressListsEnabled:$false -WarningAction SilentlyContinue
+
+        Write-Log "✅ Почтовый ящик создан (База: $mailboxDatabase)"
+        return @{ Success = $true; Database = $mailboxDatabase }  # <--- ИЗМЕНИЛИ
+      }
+      catch {
+        Write-Log "❌ Ошибка создания почтового ящика: $($_.Exception.Message)"
+        if ($_.Exception.Message -like "*уже существует*" -or $_.Exception.Message -like "*already exists*") {
+          Write-Log "ℹ️ Почтовый ящик уже существует в другой форме"
+          return @{ Success = $true; Database = $mailboxDatabase }  # <--- ИЗМЕНИЛИ
+        }
+        return @{ Success = $false; Database = "Ошибка" }  # <--- ИЗМЕНИЛИ
+      }
+    }
+  }
+  catch {
+    Write-Log "❌ Общая ошибка при работе с почтовым ящиком: $($_.Exception.Message)"
+    return @{ Success = $false; Database = "Ошибка" }  # <--- ИЗМЕНИЛИ
+  }
+}
+
+
+# === ФУНКЦИЯ ДИАГНОСТИКИ EXCHANGE ===
+function Test-ExchangeEnvironment {
+  Write-Log "=== ДИАГНОСТИКА EXCHANGE ==="
+    
+  # Проверяем доступность сервера
+  $server = "spbhdqsrv073"
+  Write-Log "🔍 Проверка доступности сервера: $server"
+    
+  $pingResult = Test-Connection -ComputerName $server -Count 1 -Quiet
+  if ($pingResult) {
+    Write-Log "✅ Сервер доступен по сети"
+  }
+  else {
+    Write-Log "❌ Сервер не доступен по сети"
+    return $false
+  }
+    
+  # Проверяем существующие сессии
+  $sessions = Get-PSSession | Where-Object { $_.ConfigurationName -eq "Microsoft.Exchange" }
+  Write-Log "📊 Найдено сессий Exchange: $($sessions.Count)"
+    
+  foreach ($session in $sessions) {
+    Write-Log "   - ID: $($session.Id), State: $($session.State), Computer: $($session.ComputerName)"
+  }
+    
+  return $true
+}
+
+
+function Show-ExchangeConnectionDialog {
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = "Подключение к Exchange"
+  $form.Size = New-Object System.Drawing.Size(400, 150)
+  $form.StartPosition = "CenterScreen"
+  $form.BackColor = [System.Drawing.Color]::FromArgb(240, 240, 240)
+  $form.FormBorderStyle = "FixedDialog"
+  $label = New-Object System.Windows.Forms.Label
+  $label.Location = New-Object System.Drawing.Point(10, 20)
+  $label.Size = New-Object System.Drawing.Size(380, 20)
+  $label.Text = "Введите имя сервера Exchange (например: spbhdqsrv073):"
+  $label.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+  $form.Controls.Add($label)
+  $textBox = New-Object System.Windows.Forms.TextBox
+  $textBox.Location = New-Object System.Drawing.Point(10, 45)
+  $textBox.Size = New-Object System.Drawing.Size(360, 22)
+  $textBox.Text = $script:Config.ExchangeServer
+  $textBox.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+  $form.Controls.Add($textBox)
+  $button = New-Object System.Windows.Forms.Button
+  $button.Location = New-Object System.Drawing.Point(10, 75)
+  $button.Text = "Подключиться"
+  $button.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+  $button.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 215)
+  $button.ForeColor = [System.Drawing.Color]::White
+  $button.FlatStyle = "Flat"
+  $button.FlatAppearance.BorderSize = 0
+  $button.Cursor = [System.Windows.Forms.Cursors]::Hand
+  $graphics = $form.CreateGraphics()
+  $textSize = $graphics.MeasureString($button.Text, $button.Font)
+  $button.Width = [Math]::Ceiling($textSize.Width) + 40
+  $button.Height = 30
+  $form.Controls.Add($button)
+  $button.Add_Click({
+      $serverName = $textBox.Text.Trim()
+      if ($serverName) {
+        # Удаляем существующие сессии Exchange
+        Get-PSSession | Where-Object { $_.ConfigurationName -eq "Microsoft.Exchange" -and $_.State -eq "Opened" } | Remove-PSSession
+
+        if (Connect-Exchange -ServerName $serverName) {
+          Show-InfoDialog -Message "✅ Подключение к Exchange успешно установлено." -Title "Успех"
+          $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+          $form.Close()
+        }
+        else {
+          Show-ErrorDialog -Message "❌ Ошибка подключения к Exchange. Проверьте лог." -Title "Ошибка"
+        }
+      }
+      else {
+        Show-ErrorDialog -Message "❌ Введите имя сервера Exchange." -Title "Ошибка"
+      }
+    })
+  $form.AcceptButton = $button
+  $result = $form.ShowDialog()
+  return ($result -eq [System.Windows.Forms.DialogResult]::OK)
+}
+
+
+# === КОНФИГУРАЦИЯ СЕРВЕРА SKYPE FOR BUSINESS ===
+$SfBServer = $script:Config.SfBServer
+$script:SfBSession = $null
+$script:SfBConnected = $false
+$script:exchangeConnected = $false
+$script:isDifferentPersonMode = $false
+
+# === ФУНКЦИЯ ПОДКЛЮЧЕНИЯ К SKYPE FOR BUSINESS ===
+function Connect-SfBServer {
+    Write-Log "SfB: Инициализация подключения..."
+
+    # Путь к папке модулей относительно скрипта (C:\temp\PSModules\RemoteSfB)
+    $ModulePath = Join-Path $PSScriptRoot "PSModules\RemoteSfB"
+    $connectedViaCache = $false
+
+    # --- ПОПЫТКА 1: ЛОКАЛЬНЫЙ МОДУЛЬ ---
+    if (Test-Path $ModulePath) {
+        try {
+            Write-Log "SfB: Обнаружен локальный модуль. Попытка быстрой загрузки..."
+            
+            Remove-Module RemoteSfB -ErrorAction SilentlyContinue
+            Import-Module $ModulePath -DisableNameChecking -ErrorAction Stop | Out-Null
+            
+            # "Пинг" сервера Skype
+            $null = Get-CsUser -ResultSize 1 -ErrorAction Stop
+            
+            $connectedViaCache = $true
+            $script:SfBConnected = $true
+            Write-Log "SfB: Успешно подключено (Fast Mode)"
+            return $true
+        }
+        catch {
+             Write-Log "SfB: Ошибка кэша ($($_.Exception.Message)). Переход к прямому подключению..."
+             Remove-Module RemoteSfB -ErrorAction SilentlyContinue
+        }
+    }
+
+    # --- ПОПЫТКА 2: ПРЯМОЕ ПОДКЛЮЧЕНИЕ ---
+    if (-not $connectedViaCache) {
+        try {
+            Write-Log "SfB: Создание удаленной сессии (Legacy Mode)..."
+            
+            $SfBServer = $script:Config.SfBServer
+            
+            # Опции сессии (игнор сертификатов)
+            $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+            
+            $session = New-PSSession -ConnectionUri "https://$SfBServer/OcsPowershell" `
+                                     -SessionOption $sessionOption `
+                                     -Authentication Negotiate `
+                                     -ErrorAction Stop
+            
+            if ($session) {
+                # Импорт с подавлением вывода
+                Import-PSSession $session -AllowClobber -ErrorAction Stop | Out-Null
+                
+                $script:SfBConnected = $true
+                Write-Log "SfB: Успешно подключено (Direct Session)"
+                return $true
+            }
+        }
+        catch {
+            Write-Log "SfB: КРИТИЧЕСКАЯ ОШИБКА ПОДКЛЮЧЕНИЯ: $($_.Exception.Message)"
+            $script:SfBConnected = $false
+            return $false
+        }
+    }
+    return $false
+}
+
+# === Функция создания локальных модулей команд для exchange и sfb ===
+function Export-RemoteModules {
+    # Блокируем интерфейс, чтобы пользователь не тыкал кнопки
+    $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    $buttonParse.Enabled = $false
+    $buttonClear.Enabled = $false
+    
+    # Чтобы не плодить переменные в логе, пишем в LogBox через Write-Log
+    # (предполагаем, что Write-Log у вас уже переключается на вкладку лога)
+    $tabLog.Select() # Переключаем пользователя на вкладку лога, чтобы он видел прогресс
+    
+    try {
+        $ModulePath = Join-Path $PSScriptRoot "PSModules"
+        Write-Log "🚀 ЗАПУСК ЭКСПОРТА МОДУЛЕЙ"
+        Write-Log "📂 Папка: $ModulePath"
+        
+        if (!(Test-Path $ModulePath)) { 
+            New-Item -ItemType Directory -Path $ModulePath -Force | Out-Null
+        }
+
+        # --- EXCHANGE ---
+        Write-Log "⏳ [1/2] Подключение к Exchange для экспорта..."
+        try {
+            $exchSession = New-PSSession -ConfigurationName Microsoft.Exchange `
+                -ConnectionUri "http://$($script:Config.ExchangeServer)/PowerShell/" `
+                -Authentication Kerberos `
+                -ErrorAction Stop
+                
+            Write-Log "💾 Экспорт команд Exchange..."
+            Export-PSSession -Session $exchSession `
+                -OutputModule (Join-Path $ModulePath "RemoteExchange") `
+                -AllowClobber -Force | Out-Null
+                
+            Remove-PSSession $exchSession
+            Write-Log "✅ Exchange: Успешно экспортировано"
+        }
+        catch {
+            Write-Log "❌ Ошибка экспорта Exchange: $($_.Exception.Message)"
+        }
+
+        # --- SKYPE FOR BUSINESS ---
+        Write-Log "⏳ [2/2] Подключение к SfB для экспорта..."
+        try {
+            $sfbOptions = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+            $sfbSession = New-PSSession -ConnectionUri "https://$($script:Config.SfBServer)/OcsPowershell" `
+                -SessionOption $sfbOptions `
+                -Authentication Negotiate `
+                -ErrorAction Stop
+                
+            Write-Log "💾 Экспорт команд SfB..."
+            Export-PSSession -Session $sfbSession `
+                -OutputModule (Join-Path $ModulePath "RemoteSfB") `
+                -AllowClobber -Force | Out-Null
+                
+            Remove-PSSession $sfbSession
+            Write-Log "✅ SfB: Успешно экспортировано"
+        }
+        catch {
+            Write-Log "❌ Ошибка экспорта SfB: $($_.Exception.Message)"
+        }
+        
+        Write-Log "🏁 ГОТОВО! Перезапустите скрипт для использования кэша."
+        Show-InfoDialog -Message "Модули успешно загружены в папку:`n$ModulePath`n`nТеперь скрипт будет запускаться мгновенно." -Title "Успех"
+    }
+    catch {
+        Write-Log "❌ КРИТИЧЕСКАЯ ОШИБКА: $($_.Exception.Message)"
+        Show-ErrorDialog -Message "Произошла ошибка при экспорте:`n$($_.Exception.Message)" -Title "Ошибка"
+    }
+    finally {
+        # Возвращаем интерфейс к жизни
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        $buttonParse.Enabled = $true
+        $buttonClear.Enabled = $true
+        # Возвращаем пользователя на вкладку ввода
+        $tabInput.Select()
+    }
+}
+
+
+# === ФУНКЦИЯ СОЗДАНИЯ КВОТЫ (ИСПРАВЛЕН ПУТЬ N:\) ===
+function New-RemoteFolderQuota {
+    param(
+        [string]$UserFirstName, 
+        [string]$UserLastName
+    )
+    
+    $paths = Get-UserFolderPaths -FirstName $UserFirstName -LastName $UserLastName
+    $folderName = $paths.FolderName
+    $targetPath = $paths.QuotaTargetPath
+    
+    Write-Log "🔄 Настройка квоты для: $targetPath"
+    
+    $server = $script:Config.FSRMServer
+    $cimSession = $null
+
+    try {
+        # Создаем DCOM сессию (обязательно!)
+        $opt = New-CimSessionOption -Protocol Dcom
+        $cimSession = New-CimSession -ComputerName $server -SessionOption $opt -ErrorAction Stop
+        
+        # 1. Проверка существования (CIM)
+        $wmiPath = $targetPath -replace "\\", "\\"
+        $existing = Get-CimInstance -CimSession $cimSession -Namespace "Root/Microsoft/Windows/FSRM" -ClassName MSFT_FSRMQuota -Filter "Path = '$wmiPath'" -ErrorAction SilentlyContinue
+        
+        if ($existing) {
+            Write-Log "✅ Квота уже существует"
+            return @{ Success = $true; Message = "Квота уже существует"; Size = "$([math]::Round($existing.Size / 1GB, 2)) GB" }
+        }
+
+        # 2. Подготовка команды PowerShell (Safe Base64)
+        # Этот код выполнится НА СЕРВЕРЕ
+       $psCommand = @"
+Import-Module FileServerResourceManager
+try {
+    # Создаем квоту. SoftLimit не указываем - по умолчанию будет Hard (жесткая)
+    New-FsrmQuota -Path '$targetPath' -Size $script:Config.DefaultQuotaSize -Description $script:Config.DefaultQuotaDescription -ErrorAction Stop
+}
+catch {
+    `$_.Exception.Message | Out-File "C:\Windows\Temp\fsrm_error.txt"
+}
+"@
+
+        # Кодируем команду в Base64, чтобы избежать проблем с кавычками
+        $bytes = [System.Text.Encoding]::Unicode.GetBytes($psCommand)
+        $encodedCommand = [Convert]::ToBase64String($bytes)
+        
+        # Запускаем powershell.exe с закодированной командой
+        $cmdLine = "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
+        
+        Write-Log "🔄 Отправка команды создания квоты..."
+        $process = Invoke-CimMethod -CimSession $cimSession -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine = $cmdLine
+        }
+        
+        if ($process.ReturnValue -eq 0) {
+            Write-Log "⏳ Команда выполняется (PID: $($process.ProcessId))..."
+            Start-Sleep -Seconds 7 # Даем время на загрузку модуля и выполнение
+            
+            # 3. Проверяем результат
+            $verify = Get-CimInstance -CimSession $cimSession -Namespace "Root/Microsoft/Windows/FSRM" -ClassName MSFT_FSRMQuota -Filter "Path = '$wmiPath'" -ErrorAction SilentlyContinue
+            
+            if ($verify) {
+                Write-Log "✅ Квота успешно создана!"
+                return @{ Success = $true; Message = "Квота $($script:Config.DefaultQuotaSize) создана"; Size = $script:Config.DefaultQuotaSize }
+            }
+            else {
+                Write-Log "❌ Квота не появилась."
+                # Пытаемся прочитать лог ошибки с сервера (если есть права на C$)
+                # Или просто пишем пользователю
+                return @{ Success = $false; Error = "Квота не создалась. Возможна ошибка модуля FSRM." }
+            }
+        }
+        else {
+            return @{ Success = $false; Error = "Ошибка запуска процесса: $($process.ReturnValue)" }
+        }
+    }
+    catch {
+        Write-Log "❌ Ошибка DCOM: $($_.Exception.Message)"
+        return @{ Success = $false; Error = $_.Exception.Message }
+    }
+    finally {
+        if ($cimSession) { Remove-CimSession $cimSession -ErrorAction SilentlyContinue }
+    }
+}
+
+
+
+
+# === ФУНКЦИЯ ПРОВЕРКИ КВОТЫ (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ) ===
+function Test-UserFolderQuota {
+  param(
+    [string]$UserFirstName,
+    [string]$UserLastName
+  )
+    
+  $paths = Get-UserFolderPaths -FirstName $UserFirstName -LastName $UserLastName
+  $folderName = $paths.FolderName
+  $targetPath = $paths.QuotaTargetPath
+  
+  Write-Log "🔍 Проверка квоты для: $targetPath"
+  
+  $server = $script:Config.FSRMServer
+  $cimSession = $null
+
+  try {
+    # Обязательно DCOM
+    $opt = New-CimSessionOption -Protocol Dcom
+    $cimSession = New-CimSession -ComputerName $server -SessionOption $opt -ErrorAction Stop
+    
+    # Формируем путь для WMI фильтра (с двойными слешами)
+    $wmiPath = $targetPath -replace "\\", "\\" 
+    
+    try {
+        # Пытаемся найти квоту
+        $quota = Get-CimInstance -CimSession $cimSession -Namespace "Root/Microsoft/Windows/FSRM" -ClassName MSFT_FSRMQuota -Filter "Path = '$wmiPath'" -ErrorAction Stop
+        
+        if ($quota) {
+          $usageMB = [math]::Round($quota.Usage / 1MB, 2)
+          $sizeGB = [math]::Round($quota.Size / 1GB, 2)
+          # Защита от деления на ноль
+          $usagePercent = if ($quota.Size -gt 0) { [math]::Round(($quota.Usage / $quota.Size) * 100, 2) } else { 0 }
+                    
+          return @{
+            Exists  = $true
+            Status  = "Квота настроена"
+            Message = "Квота: $sizeGB GB (Использовано: $usageMB MB, $usagePercent%)"
+            Size    = "$sizeGB GB"
+            Usage   = "$usagePercent%"
+          }
+        }
+        else {
+           # Если точное совпадение не найдено, попробуем добавить слеш в конце
+           # FSRM иногда хранит путь с закрывающим слешем
+           $wmiPathSlash = "$wmiPath\\"
+           $quotaSlash = Get-CimInstance -CimSession $cimSession -Namespace "Root/Microsoft/Windows/FSRM" -ClassName MSFT_FSRMQuota -Filter "Path = '$wmiPathSlash'" -ErrorAction SilentlyContinue
+           
+           if ($quotaSlash) {
+               $sizeGB = [math]::Round($quotaSlash.Size / 1GB, 2)
+               return @{
+                   Exists  = $true
+                   Status  = "Квота настроена"
+                   Message = "Квота: $sizeGB GB (Путь со слешем)"
+                   Size    = "$sizeGB GB"
+               }
+           }
+        }
+        
+        return @{
+            Exists  = $false
+            Status  = "Квота не настроена"
+            Message = "Квота не найдена для папки: $folderName"
+        }
+    }
+    catch {
+        return @{
+          Exists  = $false
+          Status  = "Ошибка проверки квоты"
+          Message = $_.Exception.Message
+        }
+    }
+  }
+  catch {
+    Write-Log "⚠️ Ошибка проверки (DCOM): $($_.Exception.Message)"
+    return @{
+      Exists  = $false
+      Status  = "Ошибка подключения"
+      Message = $_.Exception.Message
+    }
+  }
+  finally {
+    if ($cimSession) { Remove-CimSession $cimSession -ErrorAction SilentlyContinue }
+  }
+}
+
+
+
+
+# ===  ФУНКЦИЯ ОБРАБОТКИ SfB ===
+function Set-SfBUser {
+  param([string]$UserIdentity)
+    
+  Write-Log "🔄 Обработка пользователя в SfB: $UserIdentity"
+    
+  try {
+    # Подключаемся к SfB если еще не подключены
+    if (-not (Connect-SfBServer)) {
+      Write-Log "⚠️ Не удалось подключиться к SfB, операции SfB пропущены"
+      return @{ Success = $false; Action = "no_connection"; Message = "Нет подключения к SfB" }
+    }
+
+    # Получаем DistinguishedName пользователя
+    Write-Log "🔍 Получение DistinguishedName пользователя..."
+    $adUser = Get-ADUser -Identity $UserIdentity -Properties DistinguishedName, UserPrincipalName -ErrorAction Stop
+    $userDN = $adUser.DistinguishedName
+    $userUPN = $adUser.UserPrincipalName
+    Write-Log "✅ DN пользователя: $userDN"
+    Write-Log "✅ UPN пользователя: $userUPN"
+
+    # ⏳ ОЖИДАЕМ РЕПЛИКАЦИИ AD ДЛЯ SfB ТОЛЬКО ЕСЛИ ПОЛЬЗОВАТЕЛЬ НОВЫЙ ИЛИ БЫЛ ИЗМЕНЕН
+    # Проверяем текущий статус в SfB
+    Write-Log "🔍 Проверка статуса пользователя в SfB..."
+    $sfbUser = $null
+    $userExists = $false
+    $userEnabled = $false
+        
+    try {
+      $sfbUser = Get-CsUser -Identity $userDN -ErrorAction SilentlyContinue
+      if ($sfbUser) {
+        $userExists = $true
+        $userEnabled = $sfbUser.Enabled
+        Write-Log "📊 Статус SfB: существует=$userExists, активен=$userEnabled"
+      }
+      else {
+        Write-Log "📊 Статус SfB: пользователь не найден"
+        $userExists = $false
+                
+        # ⏳ ЕСЛИ ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН В SfB - ЖДЕМ РЕПЛИКАЦИИ AD
+        Wait-ADReplication -Seconds 5 -Message "Ожидание репликации AD для SfB" -UpdateProgress
+      }
+    }
+    catch {
+      if ($_.Exception.Message -like "*не найден*" -or $_.Exception.Message -like "*not found*" -or $_.Exception.Message -like "*Объект управления*") {
+        Write-Log "📊 Статус SfB: пользователь не найден (возможно еще не реплицировался)"
+        $userExists = $false
+                
+        # ⏳ ЕСЛИ ПОЛЬЗОВАТЕЛЬ НЕ НАЙДЕН В SfB - ЖДЕМ РЕПЛИКАЦИИ AD
+        Wait-ADReplication -Seconds 5 -Message "Ожидание репликации AD для SfB" -UpdateProgress
+      }
+      else {
+        Write-Log "⚠️ Ошибка при проверке пользователя SfB: $($_.Exception.Message)"
+        return @{ Success = $false; Action = "error"; Message = "Ошибка проверки" }
+      }
+    }
+
+    # Обрабатываем в зависимости от статуса
+    if ($userExists) {
+      if ($userEnabled) {
+        Write-Log "✅ Пользователь уже активен в SfB"
+        return @{ Success = $true; Action = "already_active"; Message = "Уже активен в SfB" }
+      }
+      else {
+        Write-Log "🔄 Пользователь отключен в SfB, включаем..."
+        try {
+          Enable-CsUser -Identity $userDN -RegistrarPool $script:Config.SfBServer -SipAddressType "UserPrincipalName" -ErrorAction Stop
+          Write-Log "✅ Пользователь включен в SfB"
+          return @{ Success = $true; Action = "enabled"; Message = "Включен в SfB" }
+        }
+        catch {
+          Write-Log "❌ Ошибка включения пользователя в SfB: $($_.Exception.Message)"
+          return @{ Success = $false; Action = "enable_error"; Message = "Ошибка включения" }
+        }
+      }
+    }
+    else {
+      Write-Log "🔄 Пользователь не найден в SfB, создаем..."
+      try {
+        Enable-CsUser -Identity $userDN -RegistrarPool $script:Config.SfBServer -SipAddressType "UserPrincipalName" -ErrorAction Stop
+        Write-Log "✅ Пользователь успешно создан в SfB"
+                
+        # ⏳ ОЖИДАЕМ РЕПЛИКАЦИИ SfB ПОСЛЕ СОЗДАНИЯ
+        Wait-ADReplication -Seconds 3 -Message "Ожидание репликации SfB" -UpdateProgress
+                
+        return @{ Success = $true; Action = "created"; Message = "Создан в SfB" }
+      }
+      catch {
+        Write-Log "❌ Ошибка создания пользователя в SfB: $($_.Exception.Message)"
+                
+        # ЕСЛИ ОШИБКА РЕПЛИКАЦИИ - ПРОБУЕМ ЕЩЕ РАЗ ПОСЛЕ ОЖИДАНИЯ
+        if ($_.Exception.Message -like "*не найден*" -or $_.Exception.Message -like "*not found*" -or $_.Exception.Message -like "*replication*") {
+          Wait-ADReplication -Seconds 5 -Message "Повторное ожидание репликации AD для SfB"
+          try {
+            Enable-CsUser -Identity $userDN -RegistrarPool $script:Config.SfBServer -SipAddressType "UserPrincipalName" -ErrorAction Stop
+            Write-Log "✅ Пользователь успешно создан в SfB после повторной попытки"
+                        
+            # ⏳ ОЖИДАЕМ РЕПЛИКАЦИИ SfB ПОСЛЕ СОЗДАНИЯ
+        Wait-ADReplication -Seconds 3 -Message "Ожидание репликации SfB" -UpdateProgress
+            return @{ Success = $true; Action = "created"; Message = "Создан в SfB" }
+          }
+          catch {
+            Write-Log "❌ Критическая ошибка создания пользователя в SfB: $($_.Exception.Message)"
+            return @{ Success = $false; Action = "create_error"; Message = "Ошибка создания" }
+          }
+        }
+        return @{ Success = $false; Action = "create_error"; Message = "Ошибка создания" }
+      }
+    }
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при работе с SfB: $($_.Exception.Message)"
+    return @{ Success = $false; Action = "general_error"; Message = "Общая ошибка SfB" }
+  }
+}
+# === ФУНКЦИЯ СЛУЧАЙНОГО ВЫБОРА ПОЧТОВОЙ БАЗЫ ===
+function Get-RandomMailboxDatabase {
+  try {
+    $targetDatabases = $script:Config.MailboxDatabases
+    $selectedDB = ($targetDatabases | Get-Random -Count 1)[0]
+    
+    # Выбираем случайную базу
+    $selectedDB = $targetDatabases | Get-Random
+    
+    Write-Log "🎲 Выбрана случайная база данных: $selectedDB"
+    
+    return $selectedDB
+  }
+  catch {
+    Write-Log "❌ Ошибка при выборе почтовой базы: $($_.Exception.Message)"
+    return $script:Config.MailboxDatabases[0]  # По умолчанию первая база
+  }
+}
+
+
+
+
+# === БЫСТРАЯ ИНИЦИАЛИЗАЦИЯ ===
+Write-Host "ℹ️  Быстрая инициализация..." -ForegroundColor Yellow
+
+# AD модуль загружаем сразу
+try {
+  Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+  Write-Host "✅ Модуль Active Directory загружен" -ForegroundColor Green
+}
+catch {
+  Write-Host "⚠️ Модуль Active Directory не загружен" -ForegroundColor Yellow
+}
+
+# Exchange и SfB подключаем по требованию
+Write-Host "ℹ️  Exchange будет подключен автоматически при необходимости" -ForegroundColor Gray
+Write-Host "ℹ️  Skype for Business будет подключен автоматически при необходимости" -ForegroundColor Gray
+
+# === ПРОВЕРКА ПРАВ АДМИНИСТРАТОРА (быстрая) ===
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  # Только предупреждение, не блокируем запуск
+  Write-Host "⚠️ Рекомендуется запустить скрипт от имени администратора" -ForegroundColor Yellow
+}
+
+# Убираем принудительную проверку при старте, подключаем только когда нужно
+$script:exchangeConnected = $false
+$script:exchangeInitialized = $false
+
+# === КОНФИГУРАЦИЯ КЛЮЧЕВЫХ СЛОВ ДЛЯ ПОДРАЗДЕЛЕНИЙ ===
+$LocationKeywords = @{
+  "Biryuzovaya Katun"                         = @("Бирюзовая", "Катунь", "Горно-Алтайск")
+  "Hotel5"                                    = @("ГК5", "ГК 5")
+  "Hotel3"                                    = @("ГК3", "ГК 3")
+  "Grass"                                     = @("Ахтуба", "Волгоград")
+  "Выкса"                                     = @("Выкса", "ВРУ")
+  "Кантемировский"                            = @("Кантемировский", "Хуавей", "Huawei")
+  "Липецк"                                    = @("Липецк", "НЛМК")
+  "Музей"                                     = @("Музей")
+  "Росси"                                     = @("Росси")
+  "Приморский БЦ"                             = @("Приморский")
+  "Философский"                               = @("Философский")
+  "Ресторан"                                  = @("Ресторан")
+  "Дирекция по проектированию"                = @("DPP", "Дирекция по проектированию", "ДПП")
+  "Техническая дирекция"                      = @("Техническая дирекция", "Тех дир")
+  "Служба подготовки ТКП"                     = @("Служба подготовки ТКП")
+  "Коммерческая дирекция"                     = @("Коммерческая дирекция")
+  "Служба инфраструктуры IT"                  = @("ИТ-служба", "Служба инфраструктуры IT")
+  "Служба экономики бюджетирования"           = @("Служба экономики бюджетирования")
+  "Служба внедрения ИТ проектов"              = @("Служба внедрения ИТ проектов, СВИТ, STIP")
+  "Служба учета и отчетности"                 = @("Служба учета и отчетности")
+  "Казначейство"                              = @("Казначейство")
+  "Юридическая служба"                        = @("Юридическая служба")
+  "Дирекция обеспечения проектов"             = @("Дирекция обеспечения проектов", "ДОП")
+  "Служба логистики и ВЭД"                    = @("Служба логистики и ВЭД")
+  "Служба МТО и комплектации"                 = @("Служба МТО и комплектации")
+  "Служба обеспечения площадок"               = @("Служба обеспечения площадок")
+  "Служба организации тендерных процедур СМР" = @("Служба организации тендерных процедур СМР")
+  "Служба календарно-сетевого планирования"   = @("Служба календарно-сетевого планирования, SKSP, СКСП, КСП")
+  "Служба по подготовке производства"         = @("Служба по подготовке производства")
+  "Служба управления затратами"               = @("Служба управления затратами")
+  "Служба внешних и внутренних коммуникаций"  = @("Служба внешних и внутренних коммуникаций")
+  "Служба управления персоналом"              = @("Служба управления персоналом")
+  "Служба организационного развития"          = @("Служба организационного развития")
+  "Служба офиса"                              = @("Служба офиса")
+  "Дирекция по инжинирингу"                   = @("Дирекция по инжинирингу")
+}
+
+# === КОНФИГУРАЦИЯ АВТОМАТИЧЕСКОГО СОПОСТАВЛЕНИЯ ПОДРАЗДЕЛЕНИЙ И ПУЛОВ ГРУПП ===
+
+$DepartmentToPoolMapping = @{
+  # Офисные подразделения - пул "Офис"
+  "Служба логистики и ВЭД"                    = "Офис"
+  "Служба МТО и комплектации"                 = "Офис"
+  "Служба обеспечения площадок"               = "Офис"
+  "Служба организации тендерных процедур СМР" = "Офис"
+  "Служба календарно-сетевого планирования"   = "Офис"
+  "Служба по подготовке производства"         = "Офис"
+  "Служба управления затратами"               = "Офис"
+  "Служба внешних и внутренних коммуникаций"  = "Офис"
+  "Служба управления персоналом"              = "Офис"
+  "Служба организационного развития"          = "Офис"
+  "Служба офиса"                              = "Офис"
+  "Дирекция по проектированию"                = "Офис"
+  "Техническая дирекция"                      = "Офис"
+  "Служба подготовки ТКП"                     = "Офис"
+  "Коммерческая дирекция"                     = "Офис"
+  "Служба инфраструктуры IT"                  = "Офис"
+  "Служба экономики бюджетирования"           = "Офис"
+  "Служба внедрения ИТ проектов"              = "Офис"
+  "Служба учета и отчетности"                 = "Офис"
+  "Казначейство"                              = "Офис"
+  "Юридическая служба"                        = "Офис"
+  "Дирекция обеспечения проектов"             = "Офис"
+  "Дирекция по инжинирингу"                   = "Офис"
+  
+
+    
+  # Проектные площадки - соответствующие пулы
+  "Катунь"                                    = "Катунь"
+  "Бирюзовая"                                 = "Катунь"
+  "ГК"                                        = "Катунь"
+  "Ахтуба"                                    = "Grass"
+  "Волгоград"                                 = "Grass"
+  "Выкса"                                     = "Выкса"
+  "ВРУ"                                       = "Выкса"
+  "Кантемировский"                            = "Кантемировский"
+  "Хуавей"                                    = "Кантемировский"
+  "Huawei"                                    = "Кантемировский"
+  "Липецк"                                    = "Липецк"
+  "НЛМК"                                      = "Липецк"
+  "Музей"                                     = "Музей"
+  "Росси"                                     = "Росси"
+  "Философский"                               = "Философский"
+  "Ресторан"                                  = "Ресторан"
+  "Приморский"                                = "Приморский"
+
+}
+
+# === ФУНКЦИЯ АВТОМАТИЧЕСКОГО ОПРЕДЕЛЕНИЯ ПУЛА ГРУПП ===
+function Get-AutoGroupPool {
+  param(
+    [string]$departmentName,
+    [string]$workplaceText
+  )
+    
+  # Сначала проверяем точное совпадение по названию отдела
+  if ($departmentName -and $DepartmentToPoolMapping.ContainsKey($departmentName)) {
+    Write-Log "✅ Автоматически определен пул групп: $($DepartmentToPoolMapping[$departmentName]) для отдела: $departmentName"
+    return $DepartmentToPoolMapping[$departmentName]
+  }
+    
+  # Если точного совпадения нет, ищем по ключевым словам в тексте рабочего места
+  if ($workplaceText) {
+    $workplaceLower = $workplaceText.ToLower()
+    foreach ($keyword in $DepartmentToPoolMapping.Keys) {
+      $keywordLower = $keyword.ToLower()
+      if ($workplaceLower -like "*$keywordLower*") {
+        Write-Log "✅ Автоматически определен пул групп: $($DepartmentToPoolMapping[$keyword]) по ключевому слову: $keyword"
+        return $DepartmentToPoolMapping[$keyword]
+      }
+    }
+  }
+    
+  Write-Log "⚠️ Не удалось автоматически определить пул групп для: $departmentName"
+  return $null
+}
+
+# === БАЗОВЫЙ НАБОР ГРУПП ===
+$GroupPoolBase = @(
+    'U--!ОБМЕН (RW)',
+    'U--Users (TR)',
+    'S--SCAN (TR)',
+    'P--Project (TR)',
+    'Users Password Policies',
+    'all',
+    'AccessGroup_AnyConnect_Allow',
+    'AccessGroup_Portal',
+    'O--Office_All_Shared_Folders',
+    'O--Office (TR)',
+    'O--СВИТ--10 (RO)',
+    'O--ДпП--06 (RO)',
+    'o--доп--27 (RO)',
+    'O--СКСП--01 (RO)',
+    'O--ЮС--09--02--01 (RO)',
+    'O--ЮС--09--02--04 (RO)',
+    'O--ЮС--09--02--06 (RO)',
+    'O--ЮС--09--02--10 (RO)',
+    'O--ЮС--09--02--13 (RO)',
+    'O--ЮС--09--02--20 (RO)',
+    'O--ЮС--09--02--24 (RO)',
+    'O--ЮС--14--01 (RO)',
+    'O--ЮС--14--02 (RO)',
+    'O--ЮС--14--03 (RO)',
+    'O--ЮС--15 (RO)',
+    'AccessGroup_Ideco_Allow',
+    'AccessGroup_RDGW_Allow',
+    'AccessGroup_RDS_Chrome_VPN'
+)
+
+# === ПУЛЫ ГРУПП ===
+$GroupPools = @{
+    "Группы для проекта" = $GroupPoolBase
+    "Офис"               = @('office.spb', 'S--SCAN_Office (TR)', 'S--SCAN_Office (RW)') + $GroupPoolBase
+    "Кантемировский"     = @('S--SCAN_БЦ Кантемировский (RW)') + $GroupPoolBase
+    "Выкса"              = @('S--SCAN_VYKSA-VRU (RW)') + $GroupPoolBase
+    "Grass"              = @('S--SCAN_GRASS (RW)') + $GroupPoolBase
+    "Музей"              = @('S--SCAN_Когалым_Музей (RW)') + $GroupPoolBase
+    "Липецк"             = @('S--SCAN_NLMK-VRU20 (RW)') + $GroupPoolBase
+    "Философский"        = @('S--SCAN_Философский камень (RW)') + $GroupPoolBase
+    "Ресторан"           = @('S--SCAN_РК Когалым (RW)') + $GroupPoolBase
+    "Катунь"             = @('S--SCAN_KATUN (RW)') + $GroupPoolBase
+    "Приморский"         = $GroupPoolBase
+}
+
+# === БЫСТРАЯ ЗАГРУЗКА AD (только когда нужно) ===
+function Initialize-ADModule {
+  if (-not (Get-Module -Name ActiveDirectory -ErrorAction SilentlyContinue)) {
+    try {
+      Import-Module ActiveDirectory -ErrorAction Stop
+      return $true
+    }
+    catch {
+      [System.Windows.Forms.MessageBox]::Show("❌ Ошибка загрузки модуля Active Directory: $($_.Exception.Message)", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return $false
+    }
+  }
+  return $true
+}
+
+# === ОТЛОЖЕННАЯ ЗАГРУЗКА AD ДАННЫХ ===
+function Initialize-ADData {
+  if (-not $script:ous -or -not $script:managers) {
+    Write-Log "⏳ Загрузка данных из Active Directory..."
+        
+    if (-not (Initialize-ADModule)) {
+      return $false
+    }
+        
+    try {
+      $script:ous = Get-ADOrganizationalUnit -Filter * -SearchBase $script:Config.UsersOUBase -Properties Description -SearchScope Subtree |
+      Select-Object Name, DistinguishedName, Description |
+      ForEach-Object {
+        $displayName = if ($_.Description) { "$($_.Name) ($($_.Description))" } else { $_.Name }
+        [PSCustomObject]@{
+          Name        = $_.Name
+          DN          = $_.DistinguishedName
+          DisplayName = $displayName
+          Description = $_.Description
+        }
+      }
+            
+      $script:managers = Get-ADUser -Filter { Enabled -eq $true } -Properties DisplayName |
+      Where-Object { $_.DisplayName } |
+      Select-Object SamAccountName, DisplayName |
+      Sort-Object DisplayName |
+      ForEach-Object {
+        [PSCustomObject]@{
+          Name        = $_.SamAccountName
+          DisplayName = $_.DisplayName
+        }
+      }
+            
+      Write-Log "✅ Данные AD загружены: $($script:ous.Count) подразделений, $($script:managers.Count) руководителей"
+      return $true
+            
+    }
+    catch {
+      Write-Log "❌ Ошибка загрузки данных AD: $($_.Exception.Message)"
+      return $false
+    }
+  }
+  return $true
+}
+# === ФУНКЦИЯ ПАРСИНГА ===
+function ConvertFrom-UserData {
+  param([string]$inputText)
+  $userData = @{}
+  $fioMatch = [regex]::Match($inputText, 'ФИО:\s*(.+)')
+  if ($fioMatch.Success) { 
+    $userData.FIO = $fioMatch.Groups[1].Value.Trim() -replace 'ё', 'е' -replace 'Ё', 'Е'
+    
+  }
+  $workplaceMatch = [regex]::Match($inputText, 'Рабочее место:\s*(.+)')
+  if ($workplaceMatch.Success) { 
+    $userData.Workplace = $workplaceMatch.Groups[1].Value.Trim()
+  }
+    
+  $datePatterns = @(
+    'Дата выхода:\s*(\d{1,2}\.\d{1,2}\.\d{4})',
+    'Дата выхода:\s*(\d{1,2}\.\d{1,2}\.\d{2,4})'
+  )
+  $exitDateFound = $null
+  foreach ($pattern in $datePatterns) {
+    $exitDateMatch = [regex]::Match($inputText, $pattern)
+    if ($exitDateMatch.Success) {
+      $exitDateFound = $exitDateMatch.Groups[1].Value.Trim()
+      break
+    }
+  }
+  if (-not $exitDateFound) {
+    $exitDateAltMatch = [regex]::Match($inputText, 'Дата выхода:\s*([^
+\r]+)')
+    if ($exitDateAltMatch.Success) {
+      $dateLine = $exitDateAltMatch.Groups[1].Value.Trim()
+      $datePatternMatch = [regex]::Match($dateLine, '\d{1,2}\.\d{1,2}\.\d{2,4}')
+      if ($datePatternMatch.Success) {
+        $exitDateFound = $datePatternMatch.Value
+      }
+    }
+  }
+  if ($exitDateFound) {
+    $userData.ExitDate = $exitDateFound
+  }
+    
+  $positionMatch = [regex]::Match($inputText, 'Должность:\s*(.+)')
+  if ($positionMatch.Success) { 
+    $userData.Position = $positionMatch.Groups[1].Value.Trim()
+  }
+  $contactMatch = [regex]::Match($inputText, 'Контактный телефон и e-mail:\s*(.+)')
+  if ($contactMatch.Success) { 
+    $userData.Contact = $contactMatch.Groups[1].Value.Trim()
+  }
+  $managerPatterns = @(
+    'Руководитель:\s*(.+)',
+    'Руководителем:\s*(.+)',
+    'руководетеля:\s*(.+)',
+    'Начальник:\s*(.+)',
+    'Manager:\s*(.+)'
+  )
+  $managerRaw = $null
+  foreach ($pattern in $managerPatterns) {
+    $managerMatch = [regex]::Match($inputText, $pattern)
+    if ($managerMatch.Success) {
+      $managerRaw = $managerMatch.Groups[1].Value.Trim()
+      break
+    }
+  }
+  if ($managerRaw) {
+    $managerRaw = $managerRaw -replace 'поставьте руководителя\s*', '' -replace 'поставьте руководетеля\s*', '' -replace 'НАБЛЮДАТЕЛЕМ\s*', ''
+    $managerParts = $managerRaw -split '\s+' | Where-Object { $_ -and $_ -notmatch '^\s*$' }
+    if ($managerParts.Count -ge 2) {
+      $userData.Manager = "$($managerParts[0]) $($managerParts[1])"
+    }
+    else {
+      $userData.Manager = $managerRaw
+    }
+  }
+  return $userData
+}
+
+# === ФУНКЦИЯ ДЛЯ ОПРЕДЕЛЕНИЯ ПОДРАЗДЕЛЕНИЯ ПО КЛЮЧЕВЫМ СЛОВАМ ===
+function Get-DepartmentByKeywords {
+  param([string]$workplaceText)
+  if ([string]::IsNullOrWhiteSpace($workplaceText)) { return $null }
+  $workplaceLower = $workplaceText.ToLower()
+  foreach ($department in $LocationKeywords.Keys) {
+    foreach ($keyword in $LocationKeywords[$department]) {
+      if ($workplaceLower -like "*$($keyword.ToLower())*") {
+        return $department
+      }
+    }
+  }
+  return $null
+}
+
+# === ФУНКЦИЯ ДЛЯ ТРАНСЛИТЕРАЦИИ ===
+function Convert-ToTranslit {
+  param([string]$text)
+  $lowerMap = @{
+    'а' = 'a'; 'б' = 'b'; 'в' = 'v'; 'г' = 'g'; 'д' = 'd'; 'е' = 'e'; 'ё' = 'e'; 'ж' = 'zh';
+    'з' = 'z'; 'и' = 'i'; 'й' = 'y'; 'к' = 'k'; 'л' = 'l'; 'м' = 'm'; 'н' = 'n'; 'о' = 'o';
+    'п' = 'p'; 'р' = 'r'; 'с' = 's'; 'т' = 't'; 'у' = 'u'; 'ф' = 'f'; 'х' = 'h'; 'ц' = 'ts';
+    'ч' = 'ch'; 'ш' = 'sh'; 'щ' = 'sch'; 'ъ' = ''; 'ы' = 'y'; 'ь' = ''; 'э' = 'e'; 'ю' = 'yu'; 'я' = 'ya'
+  }
+  $upperMap = @{
+    'А' = 'A'; 'Б' = 'B'; 'В' = 'V'; 'Г' = 'G'; 'Д' = 'D'; 'Е' = 'E'; 'Ё' = 'E'; 'Ж' = 'Zh';
+    'З' = 'Z'; 'И' = 'I'; 'Й' = 'Y'; 'К' = 'K'; 'Л' = 'L'; 'М' = 'M'; 'Н' = 'N'; 'О' = 'O';
+    'П' = 'P'; 'Р' = 'R'; 'С' = 'S'; 'Т' = 'T'; 'У' = 'U'; 'Ф' = 'F'; 'Х' = 'H'; 'Ц' = 'Ts';
+    'Ч' = 'Ch'; 'Ш' = 'Sh'; 'Щ' = 'Sch'; 'Ъ' = ''; 'Ы' = 'Y'; 'Ь' = ''; 'Э' = 'E'; 'Ю' = 'Yu'; 'Я' = 'Ya'
+  }
+  $result = ""
+  foreach ($char in $text.ToCharArray()) {
+    if ($lowerMap.ContainsKey([string]$char)) {
+      $result += $lowerMap[[string]$char]
+    }
+    elseif ($upperMap.ContainsKey([string]$char)) {
+      $result += $upperMap[[string]$char]
+    }
+    else {
+      $result += $char
+    }
+  }
+  return $result
+}
+
+# === УЛУЧШЕННОЕ ФОРМАТИРОВАНИЕ ТЕЛЕФОНА ===
+function Format-Phone {
+  param([string]$phone)
+  if ([string]::IsNullOrWhiteSpace($phone)) {
+    return ""
+  }
+  $digits = $phone -replace '[^\d\+]', ''
+  $match1 = [regex]::Match($digits, '^(\+?7|8)(\d{10})$')
+  if ($match1.Success) {
+    $cleanNumber = '7' + $match1.Groups[2].Value
+    return "+7($($cleanNumber.Substring(1,3)))$($cleanNumber.Substring(4,3))-$($cleanNumber.Substring(7,2))-$($cleanNumber.Substring(9,2))"
+  }
+  $match2 = [regex]::Match($digits, '^(\d{10})$')
+  if ($match2.Success) {
+    $cleanNumber = '7' + $digits
+    return "+7($($cleanNumber.Substring(1,3)))$($cleanNumber.Substring(4,3))-$($cleanNumber.Substring(7,2))-$($cleanNumber.Substring(9,2))"
+  }
+  $match3 = [regex]::Match($digits, '^\+7\d{10}$')
+  if ($match3.Success) {
+    $cleanNumber = $digits
+    return "+7($($cleanNumber.Substring(2,3)))$($cleanNumber.Substring(5,3))-$($cleanNumber.Substring(8,2))-$($cleanNumber.Substring(10,2))"
+  }
+  else {
+    return $phone
+  }
+}
+
+# === ФУНКЦИЯ ДЛЯ ИЗВЛЕЧЕНИЯ ТЕЛЕФОНА ИЗ КОНТАКТНОЙ СТРОКИ ===
+function Get-PhoneFromContact {
+  param([string]$contactText)
+  if ([string]::IsNullOrWhiteSpace($contactText)) {
+    return ""
+  }
+  $parts = $contactText -split '[,;]' | ForEach-Object { $_.Trim() }
+  foreach ($part in $parts) {
+    if ($part -match '\+?[78]\s?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}') {
+      $phoneMatch = [regex]::Match($part, '(\+?[78]\s?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2})')
+      if ($phoneMatch.Success) {
+        return $phoneMatch.Groups[1].Value
+      }
+    }
+    elseif ($part -match '\+?[78][\s\-]?\d{3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}') {
+      $phoneMatch = [regex]::Match($part, '(\+?[78][\s\-]?\d{3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2})')
+      if ($phoneMatch.Success) {
+        return $phoneMatch.Groups[1].Value
+      }
+    }
+  }
+  return ""
+}
+
+# === ФУНКЦИЯ ДЛЯ ПОИСКА ПОДРАЗДЕЛЕНИЯ ПО ТЕКСТУ ===
+function Find-OUByText {
+  param([string]$searchText)
+  if ([string]::IsNullOrWhiteSpace($searchText)) { return $null }
+  $departmentByKeyword = Get-DepartmentByKeywords -workplaceText $searchText
+  if ($departmentByKeyword) {
+    $keywordMatch = $script:ous | Where-Object { 
+      $_.Name -like "*$departmentByKeyword*" -or 
+      $_.DisplayName -like "*$departmentByKeyword*" -or
+      $_.Description -like "*$departmentByKeyword*"
+    }
+    if ($keywordMatch) {
+      return $keywordMatch | Select-Object -First 1
+    }
+  }
+  $exactMatch = $script:ous | Where-Object { 
+    $_.DisplayName -eq $searchText -or 
+    $_.Name -eq $searchText -or 
+    $_.Description -eq $searchText 
+  }
+  if ($exactMatch) { return $exactMatch }
+  $partialMatch = $script:ous | Where-Object { 
+    $_.DisplayName -like "*$searchText*" -or 
+    $_.Name -like "*$searchText*" -or 
+    $_.Description -like "*$searchText*" 
+  }
+  if ($partialMatch) { return $partialMatch | Select-Object -First 1 }
+  return $null
+}
+
+# === ФУНКЦИЯ ДЛЯ ПОИСКА РУКОВОДИТЕЛЯ ПО ТЕКСТУ ===
+function Find-ManagerByText {
+  param([string]$searchText)
+  if ([string]::IsNullOrWhiteSpace($searchText)) { return $null }
+  $nameParts = $searchText -split '\s+'
+  if ($nameParts.Count -ge 2) {
+    $reversedName = "$($nameParts[1]) $($nameParts[0])"
+  }
+  $managerMatches = $script:managers | Where-Object { 
+    $_.DisplayName -eq $searchText -or
+    $_.DisplayName -eq $reversedName -or
+    $_.DisplayName -like "*$searchText*" -or
+    $searchText -like "*$_.DisplayName*"
+  }
+  return $managerMatches | Select-Object -First 1
+}
+
+# === ФУНКЦИЯ ДЛЯ ВКЛЮЧЕНИЯ/ВЫКЛЮЧЕНИЯ РЕДАКТИРОВАНИЯ ПОЛЕЙ ===
+function Set-FieldsEditable {
+  param([bool]$editable)
+    
+  if ($editable) {
+    # Режим редактирования (разные люди) - пароль, логин и ФИО ОБЯЗАТЕЛЬНЫ
+    $passwordValue.ReadOnly = $false
+    $passwordValue.BackColor = [System.Drawing.Color]::White
+    $passwordLabel.Text = "Врем. пароль: *"
+    $passwordLabel.ForeColor = [System.Drawing.Color]::Red
+        
+    # РАЗБЛОКИРОВАТЬ И ВЫДЕЛИТЬ ПОЛЕ ЛОГИНА
+    $loginValue.ReadOnly = $false
+    $loginValue.BackColor = [System.Drawing.Color]::White
+    $loginLabel.Text = "Логин: *"
+    $loginLabel.ForeColor = [System.Drawing.Color]::Red
+        
+    # ВЫДЕЛИТЬ ПОЛЯ ФИО
+    $fioLabel.ForeColor = [System.Drawing.Color]::Red
+    $lastNameLabel.Text = "Фамилия: *"
+    $lastNameLabel.ForeColor = [System.Drawing.Color]::Red
+    $firstNameLabel.Text = "Имя: *" 
+    $firstNameLabel.ForeColor = [System.Drawing.Color]::Red
+        
+    $passwordValue.Text = $script:Config.DefaultPassword  # Стандартный пароль по умолчанию
+  }
+  else {
+    # Режим обновления (один человек) - пароль НЕОБЯЗАТЕЛЕН, логин заблокирован
+    $passwordValue.ReadOnly = $false
+    $passwordValue.BackColor = [System.Drawing.Color]::White  
+    $passwordLabel.Text = "Врем. пароль:"
+    $passwordLabel.ForeColor = [System.Drawing.Color]::Black
+        
+    # ЗАБЛОКИРОВАТЬ ПОЛЕ ЛОГИНА И ВЕРНУТЬ СТАНДАРТНЫЙ ЦВЕТ
+    $loginValue.ReadOnly = $true
+    $loginValue.BackColor = [System.Drawing.Color]::FromArgb(255, 255, 240)
+    $loginLabel.Text = "Логин:"
+    $loginLabel.ForeColor = [System.Drawing.Color]::Black
+        
+    # ВЕРНУТЬ СТАНДАРТНЫЙ ЦВЕТ ДЛЯ ФИО
+    $fioLabel.ForeColor = [System.Drawing.Color]::Black
+    $lastNameLabel.Text = "Фамилия:"
+    $lastNameLabel.ForeColor = [System.Drawing.Color]::Black
+    $firstNameLabel.Text = "Имя:"
+    $firstNameLabel.ForeColor = [System.Drawing.Color]::Black
+        
+    $passwordValue.Text = $script:Config.DefaultPassword  # ОСТАВЛЯЕМ по умолчанию, но можно очистить
+  }
+}
+# === ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ ЛОГИНА НА ОСНОВЕ ФИО ===
+function Update-LoginFromFIO {
+  $fio = $fioValue.Text.Trim()
+  if (-not [string]::IsNullOrWhiteSpace($fio)) {
+    $nameParts = $fio -split '\s+'
+    if ($nameParts.Count -ge 2) {
+      $lastName = $nameParts[0]
+      $firstName = $nameParts[1]
+      $firstNameEN = Convert-ToTranslit $firstName
+      $lastNameEN = Convert-ToTranslit $lastName
+      $newLogin = "$($firstNameEN).$($lastNameEN)" -replace "\s+", ""
+      $loginValue.Text = $newLogin
+      $emailValue.Text = "$newLogin@stepcon.ru"
+    }
+  }
+}
+
+# === ФУНКЦИЯ ДЛЯ ПОИСКА СУЩЕСТВУЮЩИХ ПОЛЬЗОВАТЕЛЕЙ ===
+function Find-ExistingUsers {
+  param(
+    [string]$firstName,
+    [string]$lastName,
+    [string]$login
+  )
+    
+  $foundUsers = @()
+    
+  try {
+    Write-Log "🔍 Поиск пользователей: Фамилия='$lastName', Имя='$firstName', Логин='$login'"
+        
+    # 1. По точному логину
+    Write-Log "🔍 Этап 1: Поиск по логину '$login'"
+    $userByLogin = Get-ADUser -Filter "SamAccountName -eq '$login'" -Properties DisplayName, Enabled, DistinguishedName, GivenName, Surname, Title, Department, Manager, OfficePhone, MemberOf, Description -ErrorAction SilentlyContinue
+    if ($null -ne $userByLogin) {
+      Write-Log "✅ Найден пользователь по логину: $($userByLogin.DisplayName) (Логин: $($userByLogin.SamAccountName))"
+      $foundUsers += $userByLogin
+    }
+    else {
+      Write-Log "ℹ️ Пользователь с логином '$login' не найден"
+    }
+        
+    # 2. По комбинации Фамилия + Имя
+    Write-Log "🔍 Этап 2: Поиск по Фамилия+Имя '$lastName $firstName'"
+    $filter = "(GivenName -eq '$firstName') -and (Surname -eq '$lastName')"
+    Write-Log "🔍 Поиск по фильтру: $filter"
+        
+    $usersByName = Get-ADUser -Filter $filter -Properties DisplayName, Enabled, DistinguishedName, GivenName, Surname, Title, Department, Manager, OfficePhone, MemberOf, Description -ErrorAction SilentlyContinue
+        
+    if ($null -ne $usersByName) {
+      if ($usersByName.GetType().Name -eq "ADUser") {
+        if ($foundUsers.SamAccountName -notcontains $usersByName.SamAccountName) {
+          Write-Log "✅ Найден пользователь по ФИО: $($usersByName.DisplayName) (Логин: $($usersByName.SamAccountName))"
+          $foundUsers += $usersByName
+        }
+      }
+      else {
+        foreach ($user in $usersByName) {
+          if ($foundUsers.SamAccountName -notcontains $user.SamAccountName) {
+            Write-Log "✅ Найден пользователь по ФИО: $($user.DisplayName) (Логин: $($user.SamAccountName))"
+            $foundUsers += $user
+          }
+        }
+      }
+    }
+        
+    Write-Log "🔍 Поиск завершен. Найдено пользователей: $($foundUsers.Count)"
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при поиске пользователей: $($_.Exception.Message)"
+    return @()
+  }
+    
+  return , @($foundUsers)
+}
+
+# === ФУНКЦИЯ: ДИАЛОГ ВЫБОРА ПРИ ОБНАРУЖЕНИИ ПОЛЬЗОВАТЕЛЕЙ ===
+function Show-ExistingUserDialog {
+  param(
+    [string]$login,
+    [string]$firstName, 
+    [string]$lastName,
+    [array]$existingUsers,
+    [string]$targetOU,
+    [bool]$isFromParse = $false
+  )
+    
+  $form = New-Object System.Windows.Forms.Form
+  $form.Text = "Обнаружены совпадения в AD"
+  $form.Size = New-Object System.Drawing.Size(600, 470) # Сделали чуть выше для списка
+  $form.StartPosition = "CenterScreen"
+  $form.MaximizeBox = $false
+  $form.MinimizeBox = $false
+  $form.FormBorderStyle = "FixedDialog"
+    
+  $label = New-Object System.Windows.Forms.Label
+  $label.Location = New-Object System.Drawing.Point(10, 10)
+  $label.Size = New-Object System.Drawing.Size(560, 40)
+  $label.Text = "Обнаружены пользователи с похожим логином/ФИО!`nВыберите нужную учетную запись из списка (если это один человек):"
+  $label.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    
+  # --- ВОЗВРАЩАЕМ LISTBOX ДЛЯ ВЫБОРА КОНКРЕТНОГО ПОЛЬЗОВАТЕЛЯ ---
+  $existingGroup = New-Object System.Windows.Forms.GroupBox
+  $existingGroup.Location = New-Object System.Drawing.Point(10, 60)
+  $existingGroup.Size = New-Object System.Drawing.Size(560, 100)
+  $existingGroup.Text = "Найденные учетные записи в AD"
+  $existingGroup.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    
+  $listBox = New-Object System.Windows.Forms.ListBox
+  $listBox.Location = New-Object System.Drawing.Point(10, 20)
+  $listBox.Size = New-Object System.Drawing.Size(540, 70)
+  $listBox.Font = New-Object System.Drawing.Font("Consolas", 9)
+  
+  # Заполняем список
+  foreach ($user in $existingUsers) {
+    $status = if ($user.Enabled) { "Активен" } else { "Отключен" }
+    $listBox.Items.Add("$($user.DisplayName) (Логин: $($user.SamAccountName)) - $status") | Out-Null
+  }
+  $listBox.SelectedIndex = 0 # Выбираем первого по умолчанию
+    
+  $existingGroup.Controls.Add($listBox)
+    
+  # --- Новый пользователь из парсинга ---
+  $newUserInfo = "ФИО: $lastName $firstName`r`nЛогин: $login"
+  $newGroup = New-Object System.Windows.Forms.GroupBox
+  $newGroup.Location = New-Object System.Drawing.Point(10, 170)
+  $newGroup.Size = New-Object System.Drawing.Size(560, 80)
+  $newGroup.Text = "Предлагаемая учетная запись (из парсинга)"
+  $newGroup.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    
+  $newText = New-Object System.Windows.Forms.TextBox
+  $newText.Location = New-Object System.Drawing.Point(10, 20)
+  $newText.Size = New-Object System.Drawing.Size(540, 50)
+  $newText.Multiline = $true
+  $newText.ReadOnly = $true
+  $newText.BackColor = [System.Drawing.Color]::FromArgb(240, 240, 240)
+  $newText.Text = $newUserInfo
+  $newText.Font = New-Object System.Drawing.Font("Consolas", 8.5)
+    
+  $newGroup.Controls.Add($newText)
+    
+  # ==== НАШ ЧЕКБОКС ====
+  $chkKeepGroups = New-Object System.Windows.Forms.CheckBox
+  $chkKeepGroups.Location = New-Object System.Drawing.Point(15, 260)
+  $chkKeepGroups.Size = New-Object System.Drawing.Size(540, 20)
+  $chkKeepGroups.Text = "Не изменять группы доступа (оставить текущие права в AD)"
+  $chkKeepGroups.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+  $chkKeepGroups.Checked = $false
+  $form.Controls.Add($chkKeepGroups)
+
+  # --- КНОПКИ ---
+  $btnSamePerson = New-Object System.Windows.Forms.Button
+  $btnSamePerson.Location = New-Object System.Drawing.Point(10, 290) 
+  $btnSamePerson.Size = New-Object System.Drawing.Size(180, 35)
+  $btnSamePerson.Text = "Это ОДИН человек"
+  $btnSamePerson.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+  $btnSamePerson.BackColor = [System.Drawing.Color]::FromArgb(255, 193, 7)
+  $btnSamePerson.ForeColor = [System.Drawing.Color]::Black
+  $btnSamePerson.FlatStyle = "Flat"
+  $btnSamePerson.FlatAppearance.BorderSize = 0
+    
+  $btnDifferentPerson = New-Object System.Windows.Forms.Button
+  $btnDifferentPerson.Location = New-Object System.Drawing.Point(200, 290)
+  $btnDifferentPerson.Size = New-Object System.Drawing.Size(180, 35)
+  $btnDifferentPerson.Text = "Это РАЗНЫЕ люди"
+  $btnDifferentPerson.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+  $btnDifferentPerson.BackColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
+  $btnDifferentPerson.ForeColor = [System.Drawing.Color]::White
+  $btnDifferentPerson.FlatStyle = "Flat"
+  $btnDifferentPerson.FlatAppearance.BorderSize = 0
+    
+  $btnCancel = New-Object System.Windows.Forms.Button
+  $btnCancel.Location = New-Object System.Drawing.Point(390, 290)
+  $btnCancel.Size = New-Object System.Drawing.Size(180, 35)
+  $btnCancel.Text = "Отмена"
+  $btnCancel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+  $btnCancel.BackColor = [System.Drawing.Color]::FromArgb(108, 117, 125)
+  $btnCancel.ForeColor = [System.Drawing.Color]::White
+  $btnCancel.FlatStyle = "Flat"
+  $btnCancel.FlatAppearance.BorderSize = 0
+    
+  $form.Controls.Add($label)
+  $form.Controls.Add($existingGroup)
+  $form.Controls.Add($newGroup)
+  $form.Controls.Add($btnSamePerson)
+  $form.Controls.Add($btnDifferentPerson)
+  $form.Controls.Add($btnCancel)
+    
+  # --- ОБРАБОТЧИКИ ---
+  $script:dialogResult = $null
+    
+  $btnSamePerson.Add_Click({
+      # БЕРЕМ ТОГО ПОЛЬЗОВАТЕЛЯ, КОТОРОГО ВЫДЕЛИЛИ КЛИКОМ В СПИСКЕ!
+      $selectedIndex = $listBox.SelectedIndex
+      if ($selectedIndex -ge 0) {
+          $selectedUser = $existingUsers[$selectedIndex]
+      } else {
+          $selectedUser = $existingUsers[0]
+      }
+      
+      $script:dialogResult = @{
+        Action       = "UpdateUser"
+        UserToUpdate = $selectedUser # <--- Теперь передается ВЫБРАННАЯ учетка!
+        KeepGroups   = $chkKeepGroups.Checked
+      }
+      $form.Close()
+  })
+    
+  $btnDifferentPerson.Add_Click({
+      if ($isFromParse) {
+        $script:isDifferentPersonMode = $true
+        # Разблокируем поля (подразумевается, что функция Set-FieldsEditable есть)
+        try { Set-FieldsEditable -editable $true } catch {}
+        
+        [System.Windows.Forms.MessageBox]::Show(
+          "✅ Режим 'Разные люди' активирован!`n`n" +
+          "Поле Логин разблокировано для редактирования.`n" +
+          "Пожалуйста:`n" +
+          "1. Придумайте УНИКАЛЬНЫЙ логин и ФИО для нового пользователя`n" +
+          "2. Email обновится автоматически на основе логина`n" +
+          "3. Убедитесь, что новый логин не используется другими пользователями`n`n" +
+          "После ввода уникального логина нажмите 'Создать учетную запись'",
+          "Режим создания нового пользователя",
+          [System.Windows.Forms.MessageBoxButtons]::OK,
+          [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+      }
+    
+      $script:dialogResult = @{
+        Action = "DifferentPerson"
+      }
+      $form.Close()
+  })
+    
+  $btnCancel.Add_Click({
+      $script:dialogResult = $null
+      $form.Close()
+  })
+    
+  $form.Add_FormClosing({
+      if ($null -eq $script:dialogResult) {
+        $script:dialogResult = $null
+      }
+  })
+    
+  $form.ShowDialog() | Out-Null
+    
+  return $script:dialogResult
+}
+# === Функция создания групп доступа пользователя === 
+function New-AccessGroups {
+  param(
+    [string]$UserFirstName,
+    [string]$UserLastName,
+    [string]$ManagerSamAccountName,
+    [string]$UserLogin,
+    [bool]$WaitForReplication = $false  # НОВЫЙ ПАРАМЕТР - управляем ожиданием извне
+  )
+    
+  Write-Log "🔄 Создание групп доступа для: $UserLastName $UserFirstName"
+    
+  # Путь к подразделению в AD
+  $OUPath = $script:Config.AccessGroupsOU
+    
+  # Формируем имена групп
+  $groupNames = Get-UserGroupNames -FirstName $UserFirstName -LastName $UserLastName
+  $GroupNameRO = $groupNames.RO
+  $GroupNameRW = $groupNames.RW
+    
+  try {
+    # Проверяем существование групп
+    $groupROExists = $false
+    $groupRWExists = $false
+        
+    if (Get-ADGroup -Filter "Name -eq '$GroupNameRO'" -ErrorAction SilentlyContinue) {
+      $groupROExists = $true
+      Write-Log "ℹ️ Группа уже существует: $GroupNameRO"
+    }
+    if (Get-ADGroup -Filter "Name -eq '$GroupNameRW'" -ErrorAction SilentlyContinue) {
+      $groupRWExists = $true
+      Write-Log "ℹ️ Группа уже существует: $GroupNameRW"
+    }
+        
+    # Флаг - создавали ли мы новые группы
+    $createdNewGroups = $false
+        
+    # Создаем группу RO только если она не существует
+    if (-not $groupROExists) {
+      Write-Log "🔄 Создание группы: $GroupNameRO"
+      New-ADGroup -Name $GroupNameRO `
+        -SamAccountName $GroupNameRO `
+        -GroupCategory Security `
+        -GroupScope Global `
+        -DisplayName $GroupNameRO `
+        -Path $OUPath `
+        -ErrorAction Stop
+      Write-Log "✅ Группа $GroupNameRO успешно создана"
+      $createdNewGroups = $true
+    }
+    else {
+      Write-Log "ℹ️ Группа $GroupNameRO уже существует, пропускаем создание"
+    }
+
+    # Создаем группу RW только если она не существует
+    if (-not $groupRWExists) {
+      Write-Log "🔄 Создание группы: $GroupNameRW"
+      New-ADGroup -Name $GroupNameRW `
+        -SamAccountName $GroupNameRW `
+        -GroupCategory Security `
+        -GroupScope Global `
+        -DisplayName $GroupNameRW `
+        -Path $OUPath `
+        -ErrorAction Stop
+      Write-Log "✅ Группа $GroupNameRW успешно создана"
+      $createdNewGroups = $true
+    }
+    else {
+      Write-Log "ℹ️ Группа $GroupNameRW уже существует, пропускаем создание"
+    }
+
+    # ⏳ ОЖИДАЕМ РЕПЛИКАЦИИ ТОЛЬКО ЕСЛИ СОЗДАВАЛИ НОВЫЕ ГРУППЫ И ЯВНО УКАЗАНО
+    # Ожидаем репликации только если создавали новые группы и явно указано
+    if ($createdNewGroups -and $WaitForReplication) {
+      Wait-ADReplication -Seconds 3 -Message "Ожидание репликации AD для новых групп" -UpdateProgress
+    }
+    elseif ($createdNewGroups) {
+      Write-Log "ℹ️ Созданы новые группы, но ожидание репликации отключено"
+    }
+    else {
+      Write-Log "ℹ️ Все группы уже существуют, репликация не требуется"
+    }
+
+    # Добавляем руководителя в группу RO
+    if ($ManagerSamAccountName -and -not [string]::IsNullOrWhiteSpace($ManagerSamAccountName)) {
+      Write-Log "🔄 Добавление руководителя $ManagerSamAccountName в группу $GroupNameRO"
+            
+      # Проверяем, не состоит ли уже руководитель в группе
+      $currentMembers = Get-ADGroupMember -Identity $GroupNameRO -ErrorAction SilentlyContinue
+      $isManagerInGroup = $currentMembers | Where-Object { $_.SamAccountName -eq $ManagerSamAccountName }
+            
+      if (-not $isManagerInGroup) {
+        Add-ADGroupMember -Identity $GroupNameRO -Members $ManagerSamAccountName -ErrorAction SilentlyContinue
+        Write-Log "✅ Руководитель успешно добавлен в группу RO"
+      }
+      else {
+        Write-Log "ℹ️ Руководитель уже состоит в группе RO"
+      }
+    }
+    else {
+      Write-Log "⚠️ Руководитель не указан, пропускаем добавление в группу RO"
+    }
+        
+    # ДОБАВЛЯЕМ САМОГО ПОЛЬЗОВАТЕЛЯ В ГРУППУ RW
+    if ($UserLogin) {
+      Write-Log "🔄 Добавление пользователя $UserLogin в группу RW: $GroupNameRW"
+            
+      # Проверяем, не состоит ли уже пользователь в группе
+      $currentMembers = Get-ADGroupMember -Identity $GroupNameRW -ErrorAction SilentlyContinue
+      $isUserInGroup = $currentMembers | Where-Object { $_.SamAccountName -eq $UserLogin }
+            
+      if (-not $isUserInGroup) {
+        try {
+          Add-ADGroupMember -Identity $GroupNameRW -Members $UserLogin -ErrorAction Stop
+          Write-Log "✅ Пользователь успешно добавлен в группу RW"
+        }
+        catch {
+          Write-Log "⚠️ Ошибка добавления пользователя в группу RW: $($_.Exception.Message)"
+          # Если ошибка репликации, ждем только если создавали новые группы
+          if (($_.Exception.Message -like "*не найден*" -or $_.Exception.Message -like "*not found*") -and $createdNewGroups) {
+            Write-Log "⏳ Повторное ожидание репликации AD (3 секунды)..."
+            Start-Sleep -Seconds 3
+            try {
+              Add-ADGroupMember -Identity $GroupNameRW -Members $UserLogin -ErrorAction Stop
+              Write-Log "✅ Пользователь успешно добавлен в группу RW после повторной попытки"
+            }
+            catch {
+              Write-Log "❌ Критическая ошибка добавления пользователя в группу RW: $($_.Exception.Message)"
+            }
+          }
+        }
+      }
+      else {
+        Write-Log "ℹ️ Пользователь уже состоит в группе RW"
+      }
+    }
+    else {
+      Write-Log "⚠️ Логин пользователя не указан, пропускаем добавление в группы"
+    }
+        
+    Write-Log "✅ Группы доступа успешно созданы/настроены"
+    return $true
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при создании групп доступа: $($_.Exception.Message)"
+    return $false
+  }
+}
+# Функция создания папок пользователя
+function New-UserFolders {
+  param([string]$UserFirstName, [string]$UserLastName)
+    
+  $paths = Get-UserFolderPaths -FirstName $UserFirstName -LastName $UserLastName
+  $folderName       = $paths.FolderName
+  $userFolderCurrent = $paths.UserFolder
+  $userFolderOBMEN  = $paths.ObmenFolder
+    
+  Write-Log "🔄 Проверка и создание папок для пользователя: $folderName"
+    
+  try {
+    # Проверяем существование основной папки
+    if (Test-Path $userFolderCurrent) {
+      Write-Log "ℹ️ Папка уже существует: $userFolderCurrent"
+      # Папка существует, проверяем папку обмена
+      if (-not (Test-Path $userFolderOBMEN)) {
+        New-Item -Path $userFolderOBMEN -ItemType Directory -Force | Out-Null
+        Write-Log "✅ Создана папка обмена: $userFolderOBMEN"
+      }
+      else {
+        Write-Log "ℹ️ Папка обмена уже существует: $userFolderOBMEN"
+      }
+    }
+    else {
+      # Создаем обе папки
+      New-Item -Path $userFolderCurrent -ItemType Directory -Force | Out-Null
+      Write-Log "✅ Создана папка: $userFolderCurrent"
+            
+      New-Item -Path $userFolderOBMEN -ItemType Directory -Force | Out-Null
+      Write-Log "✅ Создана папка обмена: $userFolderOBMEN"
+    }
+        
+    return $true
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при работе с папками: $($_.Exception.Message)"
+    return $false
+  }
+}
+
+# Функция настройки разрешений для папок
+function Set-FolderPermissions {
+  param(
+    [string]$UserFirstName,
+    [string]$UserLastName
+  )
+    
+  $paths = Get-UserFolderPaths -FirstName $UserFirstName -LastName $UserLastName
+  $folderName       = $paths.FolderName
+  $userFolderCurrent = $paths.UserFolder
+
+  # Формируем имена групп
+  $groupNames = Get-UserGroupNames -FirstName $UserFirstName -LastName $UserLastName
+  $GroupNameRO = $groupNames.RO
+  $GroupNameRW = $groupNames.RW
+  Write-Log "🔄 Настройка разрешений для папки: $userFolderCurrent"
+    
+  try {
+    # Проверяем существование папки
+    if (-not (Test-Path $userFolderCurrent)) {
+      Write-Log "❌ Папка не найдена: $userFolderCurrent"
+      return $false
+    }
+        
+    # Ждем немного для репликации групп
+    Wait-ADReplication -Seconds 5 -Message "Ожидание репликации групп" -UpdateProgress
+    Start-Sleep -Seconds 5
+        
+    # Получаем текущие ACL (сохраняем стандартные разрешения)
+    $acl = Get-Acl $userFolderCurrent
+        
+    # Получаем SID групп для надежного применения разрешений
+    $groupROSID = $null
+    $groupRWSID = $null
+        
+    try {
+      $groupROObj = Get-ADGroup -Identity $GroupNameRO -Properties SID
+      $groupROSID = $groupROObj.SID
+      Write-Log "ℹ️ Получен SID для группы RO: $($groupROSID.Value)"
+    }
+    catch {
+      Write-Log "⚠️ Не удалось получить SID группы RO: $GroupNameRO"
+    }
+        
+    try {
+      $groupRWObj = Get-ADGroup -Identity $GroupNameRW -Properties SID
+      $groupRWSID = $groupRWObj.SID
+      Write-Log "ℹ️ Получен SID для группы RW: $($groupRWSID.Value)"
+    }
+    catch {
+      Write-Log "⚠️ Не удалось получить SID группы RW: $GroupNameRW"
+    }
+        
+    # Добавляем правило для группы RO используя SID
+    if ($groupROSID) {
+      $ruleRO = [System.Security.AccessControl.FileSystemAccessRule]::new(
+        $groupROSID,
+        [System.Security.AccessControl.FileSystemRights]::ReadAndExecute -bOr `
+          [System.Security.AccessControl.FileSystemRights]::ListDirectory -bOr `
+          [System.Security.AccessControl.FileSystemRights]::Read,
+        [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bOr `
+          [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow
+      )
+            
+      # Проверяем, нет ли уже такого правила
+      $hasRORule = $acl.Access | Where-Object { 
+        $_.IdentityReference -eq $groupROSID -or 
+        $_.IdentityReference -like "*$GroupNameRO*"
+      }
+            
+      if (-not $hasRORule) {
+        $acl.AddAccessRule($ruleRO)
+        Write-Log "✅ Добавлено разрешение для группы RO: $GroupNameRO"
+      }
+      else {
+        Write-Log "ℹ️ Разрешение для группы RO уже существует: $GroupNameRO"
+      }
+    }
+        
+    # Добавляем правило для группы RW используя SID
+    if ($groupRWSID) {
+      $ruleRW = [System.Security.AccessControl.FileSystemAccessRule]::new(
+        $groupRWSID,
+        [System.Security.AccessControl.FileSystemRights]::ReadAndExecute -bOr `
+          [System.Security.AccessControl.FileSystemRights]::ListDirectory -bOr `
+          [System.Security.AccessControl.FileSystemRights]::Read -bOr `
+          [System.Security.AccessControl.FileSystemRights]::Write -bOr `
+          [System.Security.AccessControl.FileSystemRights]::Modify,
+        [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bOr `
+          [System.Security.AccessControl.InheritanceFlags]::ObjectInherit,
+        [System.Security.AccessControl.PropagationFlags]::None,
+        [System.Security.AccessControl.AccessControlType]::Allow
+      )
+            
+      # Проверяем, нет ли уже такого правила
+      $hasRWRule = $acl.Access | Where-Object { 
+        $_.IdentityReference -eq $groupRWSID -or 
+        $_.IdentityReference -like "*$GroupNameRW*"
+      }
+            
+      if (-not $hasRWRule) {
+        $acl.AddAccessRule($ruleRW)
+        Write-Log "✅ Добавлено разрешение для группы RW: $GroupNameRW"
+      }
+      else {
+        Write-Log "ℹ️ Разрешение для группы RW уже существует: $GroupNameRW"
+      }
+    }
+        
+    # Применяем новые разрешения
+    Set-Acl -Path $userFolderCurrent -AclObject $acl
+        
+    Write-Log "✅ Разрешения успешно настроены для папки: $userFolderCurrent"
+    return $true
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при настройке разрешений: $($_.Exception.Message)"
+    return $false
+  }
+}
+
+# ===  ФУНКЦИЯ СОЗДАНИЯ ИНФРАСТРУКТУРЫ ДОСТУПА ===
+function New-UserAccessInfrastructure {
+  param(
+    [string]$Login, 
+    [string]$FirstName, 
+    [string]$LastName, 
+    [string]$ManagerSamAccountName
+  )
+    
+  Write-Log "🚀 Начало создания инфраструктуры доступа для: $LastName $FirstName"
+    
+  try {
+    # 1. Создаем группы доступа
+    $groupsResult = New-AccessGroups -UserFirstName $FirstName -UserLastName $LastName -ManagerSamAccountName $ManagerSamAccountName -UserLogin $Login
+        
+    # 2. Создаем папки
+    $foldersResult = New-UserFolders -UserFirstName $FirstName -UserLastName $LastName
+        
+    # 3. Создаем квоту через прямое обращение к FSRM
+    $quotaResult = New-RemoteFolderQuota -UserFirstName $FirstName -UserLastName $LastName
+        
+    # 4. Настраиваем разрешения
+    $permissionsResult = Set-FolderPermissions -UserFirstName $FirstName -UserLastName $LastName
+        
+    Write-Log "✅ Инфраструктура доступа создана: Группы=$groupsResult, Папки=$foldersResult, Квота=$($quotaResult.Success), Разрешения=$permissionsResult"
+        
+    return @{
+      Success     = ($groupsResult -and $foldersResult -and $permissionsResult)
+      Groups      = $groupsResult
+      Folders     = $foldersResult
+      Quota       = $quotaResult
+      Permissions = $permissionsResult
+    }
+        
+  }
+  catch {
+    Write-Log "❌ Ошибка при создании инфраструктуры доступа: $($_.Exception.Message)"
+    return @{
+      Success     = $false
+      Groups      = $false
+      Folders     = $false
+      Quota       = @{Success = $false; Error = $_.Exception.Message }
+      Permissions = $false
+    }
+  }
+}
+
+# === ФУНКЦИЯ ОБНОВЛЕНИЯ ПОЛЬЗОВАТЕЛЯ ===
+function Update-ExistingUser {
+    param (
+        [string]$login,
+        [string]$firstName,
+        [string]$lastName,
+        [string]$position,
+        [string]$workplaceSelection,
+        [object]$selectedOU,
+        [string]$phone,
+        [string]$managerSelection,
+        [System.Security.SecureString]$securePassword,
+        [array]$selectedGroups,
+        [hashtable]$updateOptions,
+        [string]$Email
+    )
+    try {
+        # --- НАЧАЛО БЛОКА: СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ ---
+        $logFolder = $script:Config.UpdateLogFolder
+        if (-not (Test-Path $logFolder)) { New-Item -ItemType Directory -Path $logFolder -Force | Out-Null }
+        
+        $dateStr = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+        $script:UpdateLogFilePath = Join-Path $logFolder "${dateStr}_${login}.log"
+
+        # Получаем пользователя ДО изменений (добавлено свойство Company)
+        $existingUser = Get-ADUser -Identity $login -Properties Title, Department, Company, Manager, OfficePhone, MemberOf, DistinguishedName, Enabled, GivenName, Surname, DisplayName, Description, UserPrincipalName
+        $currentOU = $existingUser.DistinguishedName
+
+        # Расшифровываем группы и руководителя для лога
+        $beforeGroups = if ($existingUser.MemberOf) { ($existingUser.MemberOf | ForEach-Object { (Get-ADGroup $_ -ErrorAction SilentlyContinue).Name }) -join "`r`n" } else { "Нет групп" }
+        $beforeManager = if ($existingUser.Manager) { (Get-ADUser $existingUser.Manager -Properties DisplayName -ErrorAction SilentlyContinue).DisplayName } else { "Нет руководителя" }
+
+        $beforeState = @"
+=====================================================
+ОБНОВЛЕНИЕ УЧЕТНОЙ ЗАПИСИ: $login
+ДАТА: $(Get-Date -Format "dd.MM.yyyy HH:mm:ss")
+=====================================================
+=== СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ ===
+ФИО: $($existingUser.DisplayName)
+Должность: $($existingUser.Title)
+Отдел: $($existingUser.Department)
+Организация: $($existingUser.Company)
+Руководитель: $beforeManager
+Телефон: $($existingUser.OfficePhone)
+OU (Расположение): $($existingUser.DistinguishedName)
+Статус: $(if($existingUser.Enabled){"Активен"}else{"Заблокирован"})
+Группы доступа: 
+$beforeGroups
+=====================================================
+=== ЛОГ ПРОЦЕССА ОБНОВЛЕНИЯ ===
+"@
+        Add-Content -Path $script:UpdateLogFilePath -Value $beforeState -Encoding UTF8 -ErrorAction SilentlyContinue
+        # --- КОНЕЦ БЛОКА: СОСТОЯНИЕ ДО ОБНОВЛЕНИЯ ---
+
+        Write-Log "Начинаем обновление пользователя $login..."
+
+     # Логируем DC, который сейчас используется
+        try {
+            $dc = Get-ADDomainController -Discover -Service PrimaryDC
+        } catch {
+            $dc = Get-ADDomainController -Discover
+        }
+        if ($dc) {
+            Write-Log "Текущий DC: $($dc.HostName) ($($dc.Site))"
+        } else {
+            Write-Log "Не удалось определить текущий DC"
+        }
+
+        $existingUser = Get-ADUser -Identity $login -Properties Title, Department, Manager, OfficePhone, MemberOf, DistinguishedName, Enabled, GivenName, Surname, DisplayName, Description, UserPrincipalName
+        
+    # Получаем текущего пользователя ДО любых изменений
+    $existingUser = Get-ADUser -Identity $login -Properties Title, Department, Manager, OfficePhone, MemberOf, DistinguishedName, Enabled, GivenName, Surname, DisplayName, Description, UserPrincipalName
+    $currentOU = $existingUser.DistinguishedName
+        
+    Write-Log "📊 Текущее расположение пользователя: $currentOU"
+    Write-Log "📊 Целевое подразделение: $($selectedOU.DN)"
+        
+    # Включение учетной записи (если нужно)
+    if ($updateOptions.EnableAccount) {
+      if (-not $existingUser.Enabled) {
+        Enable-ADAccount -Identity $login
+        Write-Log "✅ Учетная запись включена"
+      }
+      else {
+        Write-Log "ℹ️ Учетная запись уже включена"
+      }
+    }
+
+    # Сброс пароля (если нужно)
+    if ($updateOptions.ResetPassword -and $securePassword) {
+      Set-ADAccountPassword -Identity $login -NewPassword $securePassword -Reset
+      Set-ADUser -Identity $login -ChangePasswordAtLogon $true -WarningAction SilentlyContinue
+      Write-Log "✅ Пароль сброшен, требуется изменение при следующем входе"
+    }
+    elseif ($updateOptions.ResetPassword -and ($null -eq $securePassword)) {
+      Write-Log "ℹ️ Пароль не изменен (поле пароля пустое)"
+    }
+        
+        # Обновление информации (должность, описание, телефон и т.д.)
+    if ($updateOptions.UpdateInfo) {
+      $exitDateFormatted = $dtExitDate.Value.ToString("dd.MM.yyyy")
+      $newDescription = "Выход: $exitDateFormatted"
+            
+      # Обновление описания
+      Update-UserNotes -Login $login -NewDateDescription $newDescription
+      Write-Log "✅ Заметки обновлены и Description изменено..."
+            
+      # Обновление должности
+      if ($position) {
+        Set-ADUser -Identity $login -Title $position -WarningAction SilentlyContinue
+        Write-Log "✅ Обновлена должность: '$position'"
+      }
+            
+      # Обновление отдела
+      if ($workplaceSelection) {
+        if ($workplaceSelection -match "\((.*)\)") {
+          $departmentName = $matches[1].Trim()
+        }
+        else {
+          $departmentName = $workplaceSelection
+        }
+        Set-ADUser -Identity $login -Department $departmentName -WarningAction SilentlyContinue
+        Write-Log "✅ Обновлен отдел: '$departmentName'"
+      }
+            
+      # Обновление телефона
+      if ($phone) {
+        Set-ADUser -Identity $login -MobilePhone $phone -WarningAction SilentlyContinue
+        Write-Log "✅ Телефон сохранен в поле 'Мобильный': '$phone'"
+      }
+      
+      # === Обновление организации ===
+      $selectedCompany = $companyComboBox.SelectedItem.ToString()
+      if ($selectedCompany) {
+        Set-ADUser -Identity $login -Company $selectedCompany -WarningAction SilentlyContinue
+        Write-Log "✅ Обновлена организация: '$selectedCompany'"
+      }
+    }
+
+        
+    # Обновление руководителя
+    if ($updateOptions.UpdateManager -and $managerSelection) {
+      $selectedManager = $script:managers | Where-Object { $_.DisplayName -eq $managerSelection }
+      if ($selectedManager) {
+        Set-ADUser -Identity $login -Manager $selectedManager.Name -WarningAction SilentlyContinue
+        Write-Log "✅ Руководитель обновлен: '$($selectedManager.DisplayName)'"
+      }
+    }
+        
+    # Обновление групп
+    if ($updateOptions.UpdateGroups -and $selectedGroups.Count -gt 0) {
+      Write-Log "🔄 Начинаем обновление групп доступа..."
+            
+      # Получаем текущие группы пользователя
+      $currentGroups = $existingUser.MemberOf | ForEach-Object { 
+        try {
+          (Get-ADGroup $_ -ErrorAction SilentlyContinue).Name 
+        }
+        catch {
+          $null
+        }
+      } | Where-Object { $_ -ne $null }
+            
+      # Удаляем пользователя из всех текущих групп (кроме критически важных)
+      $excludeGroups = @("Domain Users", "Users")
+      $groupsToRemove = $currentGroups | Where-Object { $_ -notin $excludeGroups -and $_ -notin $selectedGroups }
+            
+      foreach ($group in $groupsToRemove) {
+        try {
+          Remove-ADGroupMember -Identity $group -Members $login -Confirm:$false
+          Write-Log "✅ Удален из группы: $group"
+        }
+        catch {
+          Write-Log "⚠️ Ошибка удаления из группы '$group': $($_.Exception.Message)"
+        }
+      }
+            
+      # Добавляем в новые группы
+      foreach ($groupName in $selectedGroups) {
+        if ($groupName -notin $currentGroups) {
+          try {
+            Add-ADGroupMember -Identity $groupName -Members $login -Confirm:$false
+            Write-Log "✅ Добавлен в группу: $groupName"
+          }
+          catch {
+            Write-Log "⚠️ Ошибка добавления в группу '$groupName': $($_.Exception.Message)"
+          }
+        }
+      }
+    }
+        
+    # ОБРАБОТКА ПОЧТОВОГО ЯЩИКА EXCHANGE
+    $mailboxResult = Enable-ExchangeMailbox -UserLogin $login
+    $mailboxExists = $mailboxResult.Success
+    $mailboxDatabase = $mailboxResult.Database
+
+    # ОБРАБОТКА SfB, ИНФРАСТРУКТУРЫ И КВОТЫ
+    $managerSamAccountName = Get-ManagerSamAccountName -DisplayName $managerSelection
+    $provisioning = Complete-UserProvisioning -Login $login -FirstName $firstName -LastName $lastName -ManagerSamAccountName $managerSamAccountName -SkipExchange -SkipSfBReplicationWait
+    $sfbResult = $provisioning.SfB
+    $quotaInfo = $provisioning.Quota
+
+    $sfbStatusText = if ($sfbResult.Success) { $sfbResult.Message } else { "Ошибка: $($sfbResult.Message)" }
+    $quotaStatus = if ($quotaInfo.Exists) { $quotaInfo.Message } else { "Квота не настроена" }
+
+    # === ПЕРЕМЕЩЕНИЕ В НОВОЕ ПОДРАЗДЕЛЕНИЕ - В САМОМ КОНЦЕ ===
+    if ($updateOptions.MoveOU -and $selectedOU -and ($currentOU -ne $selectedOU.DN)) {
+      try {
+        Write-Log "🔄 Перемещение пользователя из $currentOU в $($selectedOU.DN)"
+        Move-ADObject -Identity $existingUser.DistinguishedName -TargetPath $selectedOU.DN
+        Write-Log "✅ Пользователь перемещен в подразделение: $($selectedOU.DisplayName)"
+                               
+      }
+      catch {
+        Write-Log "❌ Ошибка перемещения пользователя: $($_.Exception.Message)"
+      }
+    }
+    elseif ($updateOptions.MoveOU -and $selectedOU -and ($currentOU -eq $selectedOU.DN)) {
+      Write-Log "ℹ️ Пользователь уже в целевом подразделении, перемещение не требуется"
+    }
+
+    # ФИНАЛЬНАЯ ПРОВЕРКА ИНФРАСТРУКТУРЫ ДОСТУПА
+    $paths = Get-UserFolderPaths -FirstName $firstName -LastName $lastName
+    $folderName = $paths.FolderName
+    $userFolderCurrent = $paths.UserFolder
+    $userFolderOBMEN = $paths.ObmenFolder
+    $groupNames = Get-UserGroupNames -FirstName $firstName -LastName $lastName
+    $GroupNameRO = $groupNames.RO
+    $GroupNameRW = $groupNames.RW
+
+    Write-Log "=== ОТЧЕТ ПО ИНФРАСТРУКТУРЕ ДОСТУПА ==="
+    Write-Log "Папка пользователя: $userFolderCurrent (Существует: $(Test-Path $userFolderCurrent))"
+    Write-Log "Папка обмена: $userFolderOBMEN (Существует: $(Test-Path $userFolderOBMEN))"
+    Write-Log "Группа RO: $GroupNameRO (Существует: $(if (Get-ADGroup -Filter "Name -eq '$GroupNameRO'" -ErrorAction SilentlyContinue) {'Да'} else {'Нет'}))"
+    Write-Log "Группа RW: $GroupNameRW (Существует: $(if (Get-ADGroup -Filter "Name -eq '$GroupNameRW'" -ErrorAction SilentlyContinue) {'Да'} else {'Нет'}))"
+
+    # Проверяем разрешения на папке
+    try {
+      $acl = Get-Acl $userFolderCurrent
+      $hasRORule = $acl.Access | Where-Object { $_.IdentityReference -like "*$GroupNameRO*" }
+      $hasRWRule = $acl.Access | Where-Object { $_.IdentityReference -like "*$GroupNameRW*" }
+      Write-Log "Разрешения RO: $(if ($hasRORule) {'Есть'} else {'Нет'})"
+      Write-Log "Разрешения RW: $(if ($hasRWRule) {'Есть'} else {'Нет'})"
+    }
+    catch {
+      Write-Log "⚠️ Не удалось проверить разрешения: $($_.Exception.Message)"
+    }
+
+    Write-Log "✅ Существующий пользователь успешно обновлен: $login"
+
+ # ====================================================================
+    # ВСТАВЛЯЕМ ШАГ 3 СЮДА (ПОСЛЕ ВСЕХ НАСТРОЕК, НО ДО ВСПЛЫВАЮЩЕГО ОКНА)
+    # ====================================================================
+    
+    # --- НАЧАЛО БЛОКА: СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ ---
+    Write-Log "Сбор данных после обновления для лог-файла..."
+    $afterUser = Get-ADUser -Identity $login -Properties Title, Department, Company, Manager, OfficePhone, MemberOf, DistinguishedName, Enabled, GivenName, Surname, DisplayName, Description, UserPrincipalName
+    
+    $afterGroups = if ($afterUser.MemberOf) { ($afterUser.MemberOf | ForEach-Object { (Get-ADGroup $_ -ErrorAction SilentlyContinue).Name }) -join "`r`n" } else { "Нет групп" }
+    $afterManager = if ($afterUser.Manager) { (Get-ADUser $afterUser.Manager -Properties DisplayName -ErrorAction SilentlyContinue).DisplayName } else { "Нет руководителя" }
+
+    $afterState = @"
+=====================================================
+=== СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ ===
+ФИО: $($afterUser.DisplayName)
+Должность: $($afterUser.Title)
+Отдел: $($afterUser.Department)
+Организация: $($afterUser.Company)
+Руководитель: $afterManager
+Телефон: $($afterUser.OfficePhone)
+OU (Расположение): $($afterUser.DistinguishedName)
+Статус: $(if($afterUser.Enabled){"Активен"}else{"Заблокирован"})
+Группы доступа: 
+  - $afterGroups
+=====================================================
+"@
+    Add-Content -Path $script:UpdateLogFilePath -Value $afterState -Encoding UTF8 -ErrorAction SilentlyContinue
+    
+    # Отключаем файловое логирование
+    $script:UpdateLogFilePath = $null
+    # --- КОНЕЦ БЛОКА: СОСТОЯНИЕ ПОСЛЕ ОБНОВЛЕНИЯ ---
+
+
+        
+    # ФИНАЛЬНОЕ СООБЩЕНИЕ ОБ УСПЕХЕ
+try {
+    $passwordStatus = if ($null -ne $securePassword) { "сброшен (требуется изменение при входе)" } else { "не изменялся" }
+
+    $groupsStatus = if ($updateOptions.UpdateGroups) {
+        "успешно обновлены (старые удалены, новые добавлены)"
+    } else {
+        "НЕ ИЗМЕНЯЛИСЬ (оставлены текущие права)"
+    }
+
+    $successMessage = New-UserSuccessMessage -Mode "Update" -Login $login -FirstName $firstName -LastName $lastName -Email $email -Position $position -SelectedOU $selectedOU -ManagerDisplayName $comboManager.SelectedItem -ExitDateFormatted $exitDateFormatted -MailboxExists $mailboxExists -MailboxDatabase $mailboxDatabase -QuotaInfo $quotaInfo -SfBStatusText $sfbStatusText -PasswordStatus $passwordStatus -GroupsStatus $groupsStatus
+
+    Show-SuccessMessage -Title "Учетная запись обновлена!" -Message $successMessage -MessageType "Success"
+}
+catch {
+    Write-Log "❌ Ошибка при показе сообщения успеха: $($_.Exception.Message)"
+    Show-InfoDialog -Message "Учетная запись $login успешно обновлена!" -Title "Успех"
+}
+
+    Show-SuccessMessage -Title "Учетная запись обновлена!" -Message $successMessage -MessageType "Success"
+
+
+
+}
+catch {
+    Write-Log "❌ Ошибка при показе сообщения успеха: $($_.Exception.Message)"
+    # Простое сообщение об успехе
+    [System.Windows.Forms.MessageBox]::Show(
+        "Учетная запись $login успешно обновлена!",
+        "Успех",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
+    )
+}
+        
+    return $true
+  }
+  catch {
+    Write-Log "❌ Критическая ошибка при обновлении пользователя: $($_.Exception.Message)"
+    return $false
+  }
+}
+
+# === ИСПРАВЛЕННАЯ ФУНКЦИЯ СООБЩЕНИЯ УСПЕХА ===
+function Show-SuccessMessage {
+    param (
+        [string]$Title,
+        [string]$Message,  # Сюда передадим обычный текст, но внутри сделаем магию
+        [string]$MessageType = "Success"
+    )
+
+    # 1. Создаем форму (как было)
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = $Title
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+
+    # Цвета (как было)
+    $colors = @{
+        "Success" = @{ Background = [System.Drawing.Color]::FromArgb(237, 247, 237); Border = [System.Drawing.Color]::FromArgb(78, 186, 111); Icon = "✔"; TitleColor = [System.Drawing.Color]::FromArgb(34, 139, 34) }
+        "Warning" = @{ Background = [System.Drawing.Color]::FromArgb(255, 248, 225); Border = [System.Drawing.Color]::FromArgb(255, 193, 7); Icon = "!"; TitleColor = [System.Drawing.Color]::FromArgb(193, 154, 0) }
+        "Error"   = @{ Background = [System.Drawing.Color]::FromArgb(253, 237, 237); Border = [System.Drawing.Color]::FromArgb(220, 53, 69); Icon = "✖"; TitleColor = [System.Drawing.Color]::FromArgb(200, 35, 51) }
+        "Info"    = @{ Background = [System.Drawing.Color]::FromArgb(229, 246, 253); Border = [System.Drawing.Color]::FromArgb(23, 162, 184); Icon = "i"; TitleColor = [System.Drawing.Color]::FromArgb(23, 162, 184) }
+    }
+    $colorScheme = $colors[$MessageType]
+
+    # Панель
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.BorderStyle = "FixedSingle"
+    $panel.BackColor = $colorScheme.Background
+    
+    # Заголовок
+    $titleLabel = New-Object System.Windows.Forms.Label
+    $titleLabel.Text = $Title
+    $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $titleLabel.ForeColor = $colorScheme.TitleColor
+    $titleLabel.AutoSize = $true
+    
+    # --- ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ: RichTextBox вместо Label ---
+    $rtb = New-Object System.Windows.Forms.RichTextBox
+    $rtb.BackColor = $colorScheme.Background
+    $rtb.ForeColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
+    $rtb.BorderStyle = "None"
+    $rtb.ReadOnly = $true
+    $rtb.ScrollBars = "Vertical"
+    $rtb.Font = New-Object System.Drawing.Font("Segoe UI", 9) # Базовый шрифт
+
+    # ОТКЛЮЧАЕМ АВТО-ССЫЛКИ
+    $rtb.DetectUrls = $false 
+    # Конвертируем ваш текст в RTF "на лету"
+    # Мы ищем заголовки (СЛОВА БОЛЬШИМИ БУКВАМИ с двоеточием) и делаем их жирными
+    
+      # Начало RTF
+    $rtfHeader = "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\fs18 "
+    
+    # ШАГ 1: Экранируем слэши в путях
+    # Сначала экранируем слэши в ИСХОДНОМ тексте (до того как добавим \par)
+    # В PowerShell чтобы получить два слэша, нужно написать четыре :)
+    $safeMessage = $Message -replace "\\", "\\"
+    
+    # ШАГ 2: Заменяем переносы строк на RTF-команду \par
+    # Важно: делаем это ПОСЛЕ экранирования слэшей, иначе \par превратится в \\par
+    $rtfBody = $safeMessage -replace "`r`n", "\par " -replace "`n", "\par "
+    
+    # ШАГ 3: Жирный шрифт для заголовков
+    $headersToBold = @("ОСНОВНАЯ ИНФОРМАЦИЯ:", "СТАТУС СЛУЖБ:", "СОЗДАННЫЕ РЕСУРСЫ:")
+    foreach ($h in $headersToBold) {
+        $rtfBody = $rtfBody -replace $h, "\b $h\b0 "
+    }
+    
+    # ШАГ 4: Жирный шрифт для ключей
+    $keysToBold = @("ФИО:", "Логин:", "Почта:", "Должность:", "Подразделение:", "Руководитель:", "Пароль:", "Дата выхода:", "Skype for Business:", "Exchange:", "Дисковая квота:", "Папка пользователя:", "Папка обмена:", "Группа RO:", "Группа RW:")
+    foreach ($k in $keysToBold) {
+        $rtfBody = $rtfBody -replace $k, "\b $k\b0 "
+    }
+
+    $rtb.Rtf = $rtfHeader + $rtfBody + "}"
+
+    # -------------------------------------------------------
+
+    # Кнопка OK
+    $okButton = New-Object System.Windows.Forms.Button
+    $okButton.Text = "OK"
+    $okButton.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+    $okButton.BackColor = $colorScheme.Border
+    $okButton.ForeColor = [System.Drawing.Color]::White
+    $okButton.FlatStyle = "Flat"
+    $okButton.FlatAppearance.BorderSize = 0
+    $okButton.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $okButton.DialogResult = "OK"
+
+        # Размеры и расположение
+    [int]$formWidth = 500
+    [int]$formHeight = 600
+    
+    $form.Size = New-Object System.Drawing.Size($formWidth, $formHeight)
+    
+    # Явное вычисление размеров панели
+    [int]$pW = $formWidth - 35
+    [int]$pH = $formHeight - 65
+    $panel.Size = New-Object System.Drawing.Size($pW, $pH)
+    
+    $panel.Location = New-Object System.Drawing.Point(10, 10)
+
+    $titleLabel.Location = New-Object System.Drawing.Point(20, 20)
+    
+    # RTF
+    [int]$rtbW = $pW - 40
+    $rtb.Location = New-Object System.Drawing.Point(20, 50)
+    $rtb.Size = New-Object System.Drawing.Size($rtbW, 380)
+
+    # Кнопка
+    [int]$btnX = ($pW - 80) / 2
+    [int]$btnY = $pH - 50
+    $okButton.Size = New-Object System.Drawing.Size(80, 30)
+    $okButton.Location = New-Object System.Drawing.Point($btnX, $btnY)
+
+
+    # Сборка
+    $panel.Controls.Add($titleLabel)
+    $panel.Controls.Add($rtb) # Добавляем RTF вместо Label
+    $panel.Controls.Add($okButton)
+    $form.Controls.Add($panel)
+    
+    # Обработчики
+    $okButton.Add_Click({ $form.DialogResult = "OK"; $form.Close() })
+    $form.AcceptButton = $okButton
+
+    return $form.ShowDialog()
+}
+
+
+# === УПРОЩЕННАЯ ФУНКЦИЯ ДЛЯ ПРЕОБРАЗОВАНИЯ ДАТЫ ===
+function Convert-UserDate {
+  param([string]$dateString)
+  if ([string]::IsNullOrWhiteSpace($dateString)) {
+    return $null
+  }
+  try {
+    $dateMatch = [regex]::Match($dateString, '(\d{1,2}\.\d{1,2}\.\d{4})')
+    if ($dateMatch.Success) {
+      $dateStr = $dateMatch.Groups[1].Value
+      $result = [DateTime]::ParseExact($dateStr, "dd.MM.yyyy", $null)
+      Write-Log "✅ Дата распознана: $($result.ToString('dd.MM.yyyy'))"
+      return $result
+    }
+    $dateMatch = [regex]::Match($dateString, '(\d{1,2}\.\d{1,2}\.\d{2})')
+    if ($dateMatch.Success) {
+      $dateStr = $dateMatch.Groups[1].Value
+      $result = [DateTime]::ParseExact($dateStr, "dd.MM.yy", $null)
+      Write-Log "✅ Дата распознана: $($result.ToString('dd.MM.yyyy'))"
+      return $result
+    }
+    Write-Log "❌ Не удалось распознать дату: '$dateString'"
+    return $null
+  }
+  catch {
+    Write-Log "❌ Ошибка преобразования даты '$dateString': $($_.Exception.Message)"
+    return $null
+  }
+}
+
+# === ЕДИНЫЙ PIPELINE ПОСТ-ОБРАБОТКИ ПОЛЬЗОВАТЕЛЯ ===
+function Complete-UserProvisioning {
+    param(
+        [string]$Login,
+        [string]$FirstName,
+        [string]$LastName,
+        [string]$ManagerSamAccountName,
+        [switch]$SkipExchange,
+        [switch]$SkipSfBReplicationWait
+    )
+
+    # 1. Exchange
+    $mailboxResult = $null
+    if (-not $SkipExchange) {
+        $mailboxResult = Enable-ExchangeMailbox -UserLogin $Login
+        if ($mailboxResult.Success) {
+            Write-Log "✅ Почтовый ящик успешно создан/настроен"
+        }
+        else {
+            Write-Log "⚠️ Возникли проблемы с почтовым ящиком"
+        }
+    }
+
+    # 2. SfB
+    if (-not $SkipSfBReplicationWait) {
+        Wait-ADReplication -Seconds 5 -Message "Дополнительное ожидание репликации AD перед SfB" -UpdateProgress
+    }
+    Update-Progress -Message "🔄 Добавление в Skype for Business..." -Color "Black" -BackgroundColor "Yellow"
+    $sfbResult = $null
+    if (Connect-SfBServer) {
+        $sfbResult = Set-SfBUser -UserIdentity $Login
+    }
+    else {
+        Write-Log "❌ Ошибка: Не удалось подключиться к серверу SfB"
+        $sfbResult = @{ Success = $false; Message = "Нет подключения к SfB" }
+    }
+    if ($sfbResult.Success) {
+        Write-Log "✅ Skype for Business: операции завершены"
+        Update-Progress -Message "✅ Skype for Business: операции завершены" -Color "Green" -BackgroundColor "LightGreen"
+    }
+    else {
+        Write-Log "⚠️ Skype for Business: $($sfbResult.Message)"
+        Update-Progress -Message "⚠️ Skype for Business: ошибка" -Color "Black" -BackgroundColor "Yellow"
+    }
+
+    # 3. Инфраструктура доступа
+    Update-Progress -Message "🔄 Проверка и создание папок и групп доступа..." -Color "Black" -BackgroundColor "Yellow"
+    $infraResult = New-UserAccessInfrastructure -Login $Login -FirstName $FirstName -LastName $LastName -ManagerSamAccountName $ManagerSamAccountName -UserLogin $Login -WaitForReplication $false
+
+    # 4. Квота
+    $quotaInfo = Test-UserFolderQuota -UserFirstName $FirstName -UserLastName $LastName
+
+    return @{
+        Mailbox        = $mailboxResult
+        SfB            = $sfbResult
+        Infrastructure = $infraResult
+        Quota          = $quotaInfo
+    }
+}
+
+# === ФОРМИРОВАНИЕ ФИНАЛЬНОГО ОТЧЕТА ===
+function New-UserSuccessMessage {
+    param(
+        [ValidateSet("Create", "Update")]
+        [string]$Mode,
+        [string]$Login,
+        [string]$FirstName,
+        [string]$LastName,
+        [string]$Email,
+        [string]$Position,
+        [object]$SelectedOU,
+        [string]$ManagerDisplayName,
+        [string]$ExitDateFormatted,
+        [bool]$MailboxExists,
+        [string]$MailboxDatabase,
+        [object]$QuotaInfo,
+        [string]$SfBStatusText,
+        [string]$PasswordStatus = "установлен",
+        [string]$GroupsStatus = $null
+    )
+
+    $paths = Get-UserFolderPaths -FirstName $FirstName -LastName $LastName
+    $groupNames = Get-UserGroupNames -FirstName $FirstName -LastName $LastName
+    $quotaStatus = if ($QuotaInfo.Exists) { $QuotaInfo.Message } else { "Квота не настроена" }
+    $managerText = if ($ManagerDisplayName) { $ManagerDisplayName } else { "не назначен" }
+
+    $resources = if ($Mode -eq "Create") {
+        @"
+СОЗДАННЫЕ РЕСУРСЫ:
+• Папка пользователя:
+  $($paths.UserFolder)
+• Папка обмена:
+  $($paths.ObmenFolder)
+• Группа RO: $($groupNames.RO)
+• Группа RW: $($groupNames.RW)
+"@
+    }
+    else {
+        @"
+СОЗДАННЫЕ РЕСУРСЫ:
+• Группы доступа: $GroupsStatus
+• Папка пользователя:
+  $($paths.UserFolder)
+• Папка обмена:
+  $($paths.ObmenFolder)
+• Группа RO: $($groupNames.RO)
+• Группа RW: $($groupNames.RW)
+"@
+    }
+
+    return @"
+ОСНОВНАЯ ИНФОРМАЦИЯ:
+• ФИО: $LastName $FirstName
+• Логин: $Login
+• Почта: $Email
+• Должность: $Position
+• Подразделение: $($SelectedOU.DisplayName)
+• Руководитель: $managerText
+• Пароль: $PasswordStatus
+• Дата выхода: $ExitDateFormatted
+
+СТАТУС СЛУЖБ:
+• Skype for Business: $SfBStatusText
+• Exchange: $(if ($MailboxExists) { "почтовый ящик активен (База: $MailboxDatabase)" } else { "почтовый ящик не найден или не был создан" })
+• Дисковая квота: $quotaStatus
+
+$resources
+"@
+}
+
+# ===  ФУНКЦИЯ СОЗДАНИЯ ПОЛЬЗОВАТЕЛЯ С ИНФОРМАЦИЕЙ О ПАПКАХ И ГРУППАХ ===
+function New-ADUserAccount {
+  param(
+    [string]$login,
+    [string]$firstName,
+    [string]$lastName,
+    [string]$email,
+    [string]$position,
+    [string]$workplaceSelection,
+    [object]$selectedOU,
+    [string]$phone,
+    [System.Security.SecureString]$securePassword,
+    [string]$managerSelection,
+    [string]$company 
+  )
+    
+  try {
+
+     # === ОЧИЩАЕМ ПЕРЕМЕННЫЕ В НАЧАЛЕ ===
+    $mailboxDatabase = $null
+    $mailboxExists = $false
+
+    # ПРОВЕРЯЕМ МОДУЛЬ AD ПЕРЕД НАЧАЛОМ
+    if (-not (Initialize-ADModule)) {
+      Update-Progress -Message "❌ Ошибка модуля AD" -Color "Red" -BackgroundColor "LightRed"
+      return
+    }
+        
+    $phoneClean = $phone -replace '[^\d\+]', ''
+    if ($phoneClean.Length -ne 0 -and $phoneClean.Length -ne 12) {
+      Update-Progress -Message "❌ Неверный формат телефона" -Color "Red" -BackgroundColor "LightRed"
+      [System.Windows.Forms.MessageBox]::Show("❌ Неверный формат телефона. Ожидается +7(xxx)xxx-xx-xx", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return
+    }
+        
+    $managerSelection = $comboManager.SelectedItem
+    $selectedManager = $null
+    if ($managerSelection) {
+      $selectedManager = $script:managers | Where-Object { $_.DisplayName -eq $managerSelection }
+    }
+        
+    $selectedGroups = @()
+    for ($i = 0; $i -lt $listGroups.Items.Count; $i++) {
+      if ($listGroups.GetItemChecked($i)) {
+        $selectedGroups += $listGroups.Items[$i]
+      }
+    }
+        
+    # СОЗДАНИЕ ПОЛЬЗОВАТЕЛЯ В AD
+    Update-Progress -Message "🔄 Создание пользователя в AD..." -Color "Black" -BackgroundColor "Yellow"
+        
+    # Формируем описание с датой выхода
+    $exitDateFormatted = $dtExitDate.Value.ToString("dd.MM.yyyy")
+    $description = "Выход: $exitDateFormatted"
+        
+    # Используем Description OU для Department
+    $departmentDescription = if ($selectedOU.Description) { 
+      $selectedOU.Description 
+    }
+    else { 
+      if ($selectedOU.DisplayName -match "\((.*)\)") {
+        $matches[1].Trim()
+      }
+      else {
+        $selectedOU.Name
+      }
+    }
+
+    # Параметры для создания пользователя AD
+    $userParams = @{
+      Name                  = "$lastName $firstName"
+      SamAccountName        = $login
+      UserPrincipalName     = $email
+      GivenName             = $firstName
+      Surname               = $lastName
+      DisplayName           = "$lastName $firstName"
+      Title                 = $position
+      Department            = $departmentDescription
+      Company               = $company
+      Path                  = $selectedOU.DN
+      AccountPassword       = $securePassword
+      ChangePasswordAtLogon = $true
+      Enabled               = $true
+      Description           = $description
+    }
+        
+    if ($phoneClean.Length -gt 0) {
+      $userParams.MobilePhone = $phone
+    }
+        
+    # СОЗДАЕМ ПОЛЬЗОВАТЕЛЯ В AD
+    New-ADUser @userParams
+    Update-Progress -Message "✅ Пользователь создан в AD" -Color "Green" -BackgroundColor "LightGreen"
+    Write-Log "✅ Пользователь $login создан в AD"
+    Write-Log "✅ В поле Department установлено: $departmentDescription"
+    Write-Log "✅ В поле Description установлено: $description"
+
+    # ⏳ ОЖИДАЕМ РЕПЛИКАЦИИ AD ТОЛЬКО ПРИ СОЗДАНИИ НОВОГО ПОЛЬЗОВАТЕЛЯ
+    # (в режиме обновления репликация не нужна)
+    if (-not $isUpdateMode) {
+      Update-Progress -Message "⏳ Ожидание репликации AD (5 секунд)..." -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "⏳ Ожидание 5 секунд репликации AD перед работой с группами..."
+      Start-Sleep -Seconds 5
+    }
+    else {
+      Write-Log "ℹ️ Режим обновления - репликация AD не требуется"
+    }
+        
+    # Устанавливаем руководителя
+    if ($selectedManager) {
+      try {
+        Update-Progress -Message "🔄 Назначение руководителя..." -Color "Black" -BackgroundColor "Yellow"
+        Set-ADUser -Identity $login -Manager $selectedManager.Name -WarningAction SilentlyContinue
+        Update-Progress -Message "✅ Руководитель назначен" -Color "Green" -BackgroundColor "LightGreen"
+        Write-Log "✅ Руководитель установлен: $($selectedManager.DisplayName)"
+      }
+      catch {
+        Update-Progress -Message "⚠️ Ошибка назначения руководителя" -Color "Black" -BackgroundColor "Yellow"
+        Write-Log "⚠️ Ошибка установки руководителя: $($_.Exception.Message)"
+      }
+    }
+        
+    # ДОБАВЛЯЕМ В ГРУППЫ AD
+    if ($selectedGroups.Count -gt 0) {
+      Update-Progress -Message "🔄 Добавление в группы AD ($($selectedGroups.Count))..." -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "🔄 Начинаем добавление в группы AD..."
+            
+      $groupIndex = 0
+      foreach ($groupName in $selectedGroups) {
+        $groupIndex++
+        Update-Progress -Message "🔄 Добавление в группу ($groupIndex/$($selectedGroups.Count)): $groupName" -Color "Black" -BackgroundColor "Yellow"
+                
+        try {
+          Add-ADGroupMember -Identity $groupName -Members $login -ErrorAction Stop
+          Write-Log "✅ Добавлен в группу AD: $groupName"
+        }
+        catch {
+          Update-Progress -Message "⚠️ Ошибка добавления в группу: $groupName" -Color "Black" -BackgroundColor "Yellow"
+          Write-Log "⚠️ Ошибка добавления в группу AD '$groupName': $($_.Exception.Message)"
+        }
+      }
+      Update-Progress -Message "✅ Группы AD добавлены" -Color "Green" -BackgroundColor "LightGreen"
+    }
+        
+    # ПОСТ-ОБРАБОТКА: Exchange, SfB, инфраструктура, квота
+    $managerSamAccountName = Get-ManagerSamAccountName -DisplayName $managerSelection
+    $provisioning = Complete-UserProvisioning -Login $login -FirstName $firstName -LastName $lastName -ManagerSamAccountName $managerSamAccountName
+    $mailboxResult = $provisioning.Mailbox
+    $sfbResult = $provisioning.SfB
+    $quotaInfo = $provisioning.Quota
+
+    $mailboxExists = $mailboxResult.Success
+    $mailboxDatabase = $mailboxResult.Database
+
+    $sfbStatusText = if ($sfbResult.Success) { $sfbResult.Message } else { "Ошибка: $($sfbResult.Message)" }
+    $quotaStatus = if ($quotaInfo.Exists) { $quotaInfo.Message } else { "Квота не настроена" }
+
+
+    # ФИНАЛЬНОЕ СООБЩЕНИЕ ОБ УСПЕХЕ
+    $successMessage = New-UserSuccessMessage -Mode "Create" -Login $login -FirstName $firstName -LastName $lastName -Email $email -Position $position -SelectedOU $selectedOU -ManagerDisplayName $comboManager.SelectedItem -ExitDateFormatted $exitDateFormatted -MailboxExists $mailboxExists -MailboxDatabase $mailboxDatabase -QuotaInfo $quotaInfo -SfBStatusText $sfbStatusText
+
+    # Показываем красивое сообщение
+    Show-SuccessMessage -Title "СОЗДАНА УЧЕТНАЯ ЗАПИСЬ!" -Message $successMessage -MessageType "Success"
+    Write-Log "✅ Учетная запись создана успешно!"
+
+  }
+  catch {
+    Update-Progress -Message "❌ Ошибка при создании пользователя" -Color "Red" -BackgroundColor "LightRed"
+    Write-Log "❌ Ошибка при создании пользователя: $($_.Exception.Message)"
+    
+    # Детальное логирование ошибки
+    Write-Log "❌ Детали ошибки:"
+    Write-Log "   - Тип: $($_.Exception.GetType().FullName)"
+    Write-Log "   - Строка: $($_.InvocationInfo.ScriptLineNumber)"
+    Write-Log "   - Команда: $($_.InvocationInfo.Line)"
+    if ($_.Exception.StackTrace) {
+      Write-Log "   - Stack Trace: $($_.Exception.StackTrace)"
+    }
+    
+    # Показываем детали в консоли
+    Show-DetailedError -ErrorRecord $_
+    
+    [System.Windows.Forms.MessageBox]::Show("❌ Ошибка: $($_.Exception.Message)`n`nПроверьте лог для деталей.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+  }
+}
+
+
+
+# === ФУНКЦИЯ ОЧИСТКИ ФОРМЫ ===
+function Clear-Form {
+  $textBox.Text = ""
+  $fioValue.Text = ""
+  $lastNameValue.Text = ""
+  $firstNameValue.Text = ""
+  $loginValue.Text = ""
+  $emailValue.Text = ""
+  $comboWorkplace.SelectedIndex = -1
+  $positionValue.Text = ""
+  $phoneValue.Text = ""
+  $comboManager.SelectedIndex = -1
+  $comboGroupsPool.SelectedIndex = -1
+  $listGroups.Items.Clear()
+  $logBox.Text = ""
+    
+  $buttonCreate.Text = "Создать учетную запись"
+  $buttonCreate.BackColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
+    
+  # СБРОС ЦВЕТОВ И ТЕКСТА МЕТОК ПРИ ОЧИСТКЕ
+  Set-FieldsEditable -editable $false
+  $script:isDifferentPersonMode = $false
+    
+  Update-Progress -Message "Готов к работе" -Color "Blue" -BackgroundColor "LightGray"
+}
+
+# === ЗАГРУЗКА AD ===
+try {
+  Import-Module ActiveDirectory -ErrorAction Stop | Out-Null
+  $script:ous = Get-ADOrganizationalUnit -Filter * -SearchBase $script:Config.UsersOUBase -Properties Description -SearchScope Subtree |
+  Select-Object Name, DistinguishedName, Description |
+  ForEach-Object {
+    $displayName = if ($_.Description) { "$($_.Name) ($($_.Description))" } else { $_.Name }
+    [PSCustomObject]@{
+      Name        = $_.Name
+      DN          = $_.DistinguishedName
+      DisplayName = $displayName
+      Description = $_.Description
+    }
+  }
+  $script:managers = Get-ADUser -Filter { Enabled -eq $true } -Properties DisplayName |
+  Where-Object { $_.DisplayName } |
+  Select-Object SamAccountName, DisplayName |
+  Sort-Object DisplayName |
+  ForEach-Object {
+    [PSCustomObject]@{
+      Name        = $_.SamAccountName
+      DisplayName = $_.DisplayName
+    }
+  }
+}
+catch {
+  [System.Windows.Forms.MessageBox]::Show("❌ Ошибка подключения к AD: $($_.Exception.Message)", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+  exit
+}
+
+# === СОЗДАЁМ ФОРМУ ===
+$tabControl = New-Object System.Windows.Forms.TabControl
+$tabControl.Size = New-Object System.Drawing.Size(885, 680)
+$tabControl.Location = New-Object System.Drawing.Point(10, 10)
+$tabControl.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabControl.Appearance = "Normal"
+
+# === ПЕРВАЯ ВКЛАДКА: ВВОД ДАННЫХ ===
+$tabInput = New-Object System.Windows.Forms.TabPage
+$tabInput.Text = "Ввод данных"
+$tabInput.BackColor = [System.Drawing.Color]::White
+$textBox = New-Object System.Windows.Forms.TextBox
+$textBox.Multiline = $true
+$textBox.ScrollBars = "Vertical"
+$textBox.Location = New-Object System.Drawing.Point(15, 15)
+$textBox.Size = New-Object System.Drawing.Size(860, 400)
+$textBox.Font = New-Object System.Drawing.Font("Consolas", 10)
+$textBox.BackColor = [System.Drawing.Color]::White
+$textBox.ForeColor = [System.Drawing.Color]::Black
+$textBox.Text = @"
+ФИО: Горбунков Семён Семёнович
+Рабочее место: Служба внешних и внутренних коммуникаций
+Дата выхода: 13.11.2025 г.
+Должность: Киногерой
+Контактный телефон и e-mail: +7 333 333-22-22, DiamondArm@mail.ru;
+Руководитель: Колотовкин Сергей
+=============== Пример ================
+"@
+$buttonParse = New-Object System.Windows.Forms.Button
+$buttonParse.Location = New-Object System.Drawing.Point(15, 430)
+$buttonParse.Size = New-Object System.Drawing.Size(120, 35)
+$buttonParse.Text = "Парсить"
+$buttonParse.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$buttonParse.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 215)
+$buttonParse.ForeColor = [System.Drawing.Color]::White
+$buttonParse.FlatStyle = "Flat"
+$buttonParse.FlatAppearance.BorderSize = 0
+$buttonParse.Cursor = [System.Windows.Forms.Cursors]::Hand
+$buttonClear = New-Object System.Windows.Forms.Button
+$buttonClear.Location = New-Object System.Drawing.Point(150, 430)
+$buttonClear.Size = New-Object System.Drawing.Size(120, 35)
+$buttonClear.Text = "Очистить"
+$buttonClear.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$buttonClear.BackColor = [System.Drawing.Color]::FromArgb(108, 117, 125)
+$buttonClear.ForeColor = [System.Drawing.Color]::White
+$buttonClear.FlatStyle = "Flat"
+$buttonClear.FlatAppearance.BorderSize = 0
+$buttonClear.Cursor = [System.Windows.Forms.Cursors]::Hand
+$buttonClear.Add_Click({ Clear-Form })
+
+# Кнопка экспорта модулей
+$buttonExport = New-Object System.Windows.Forms.Button
+$buttonExport.Location = New-Object System.Drawing.Point(700, 430) # Правый нижний угол (под полем 860 шириной)
+$buttonExport.Size = New-Object System.Drawing.Size(150, 35)
+$buttonExport.Text = "Кэш модулей Ex и SfB"
+$buttonExport.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$buttonExport.BackColor = [System.Drawing.Color]::FromArgb(23, 162, 184) # Цвет Info (голубой)
+$buttonExport.ForeColor = [System.Drawing.Color]::White
+$buttonExport.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$buttonExport.FlatAppearance.BorderSize = 0
+$buttonExport.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+# Привязываем действие
+$buttonExport.Add_Click({ Export-RemoteModules })
+
+# ДОБАВЛЯЕМ КНОПКУ НА ФОРМУ
+$tabInput.Controls.Add($buttonExport)
+
+# === ВТОРАЯ ВКЛАДКА: ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===
+$tabOutput = New-Object System.Windows.Forms.TabPage
+$tabOutput.Text = "Данные пользователя"
+$tabOutput.BackColor = [System.Drawing.Color]::White
+
+# --- ФИО (Y=20) ---
+$fioLabel = New-Object System.Windows.Forms.Label
+$fioLabel.Location = New-Object System.Drawing.Point(15, 20)
+$fioLabel.Size = New-Object System.Drawing.Size(100, 20)
+$fioLabel.Text = "ФИО:"
+$fioLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($fioLabel)
+
+$fioValue = New-Object System.Windows.Forms.TextBox
+$fioValue.Location = New-Object System.Drawing.Point(125, 20)
+$fioValue.Size = New-Object System.Drawing.Size(300, 22)
+$fioValue.ReadOnly = $true
+$fioValue.BackColor = [System.Drawing.Color]::FromArgb(255, 255, 240)
+$fioValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($fioValue)
+
+# --- Фамилия (Y=50) ---
+$lastNameLabel = New-Object System.Windows.Forms.Label
+$lastNameLabel.Location = New-Object System.Drawing.Point(15, 50)
+$lastNameLabel.Size = New-Object System.Drawing.Size(100, 20)
+$lastNameLabel.Text = "Фамилия:"
+$lastNameLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($lastNameLabel)
+
+$lastNameValue = New-Object System.Windows.Forms.TextBox
+$lastNameValue.Location = New-Object System.Drawing.Point(125, 50)
+$lastNameValue.Size = New-Object System.Drawing.Size(200, 22)
+$lastNameValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($lastNameValue)
+
+# --- Имя (Y=80) ---
+$firstNameLabel = New-Object System.Windows.Forms.Label
+$firstNameLabel.Location = New-Object System.Drawing.Point(15, 80)
+$firstNameLabel.Size = New-Object System.Drawing.Size(100, 20)
+$firstNameLabel.Text = "Имя:"
+$firstNameLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($firstNameLabel)
+
+$firstNameValue = New-Object System.Windows.Forms.TextBox
+$firstNameValue.Location = New-Object System.Drawing.Point(125, 80)
+$firstNameValue.Size = New-Object System.Drawing.Size(200, 22)
+$firstNameValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($firstNameValue)
+
+# --- Логин (Y=110) ---
+$loginLabel = New-Object System.Windows.Forms.Label
+$loginLabel.Location = New-Object System.Drawing.Point(15, 110)
+$loginLabel.Size = New-Object System.Drawing.Size(100, 20)
+$loginLabel.Text = "Логин:"
+$loginLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($loginLabel)
+
+$loginValue = New-Object System.Windows.Forms.TextBox
+$loginValue.Location = New-Object System.Drawing.Point(125, 110)
+$loginValue.Size = New-Object System.Drawing.Size(200, 22)
+$loginValue.ReadOnly = $true
+$loginValue.BackColor = [System.Drawing.Color]::FromArgb(255, 255, 240)
+$loginValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($loginValue)
+
+# --- Почта (Y=140) ---
+$emailLabel = New-Object System.Windows.Forms.Label
+$emailLabel.Location = New-Object System.Drawing.Point(15, 140)
+$emailLabel.Size = New-Object System.Drawing.Size(100, 20)
+$emailLabel.Text = "Почта:"
+$emailLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($emailLabel)
+
+$emailValue = New-Object System.Windows.Forms.TextBox
+$emailValue.Location = New-Object System.Drawing.Point(125, 140)
+$emailValue.Size = New-Object System.Drawing.Size(200, 22)
+$emailValue.ReadOnly = $true
+$emailValue.BackColor = [System.Drawing.Color]::FromArgb(255, 255, 240)
+$emailValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($emailValue)
+
+# --- Проект/Отдел (Y=170) ---
+$workplaceLabel = New-Object System.Windows.Forms.Label
+$workplaceLabel.Location = New-Object System.Drawing.Point(15, 170)
+$workplaceLabel.Size = New-Object System.Drawing.Size(100, 20)
+$workplaceLabel.Text = "Проект/Отдел:"
+$workplaceLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($workplaceLabel)
+
+$comboWorkplace = New-Object System.Windows.Forms.ComboBox
+$comboWorkplace.Location = New-Object System.Drawing.Point(125, 170)
+$comboWorkplace.Size = New-Object System.Drawing.Size(300, 22)
+$comboWorkplace.DropDownStyle = "DropDown"
+$comboWorkplace.AutoCompleteMode = "SuggestAppend"
+$comboWorkplace.AutoCompleteSource = "ListItems"
+$comboWorkplace.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+foreach ($item in $script:ous) { $null = $comboWorkplace.Items.Add($item.DisplayName) }
+$tabOutput.Controls.Add($comboWorkplace)
+
+# --- Должность (Y=200) ---
+$positionLabel = New-Object System.Windows.Forms.Label
+$positionLabel.Location = New-Object System.Drawing.Point(15, 200)
+$positionLabel.Size = New-Object System.Drawing.Size(100, 20)
+$positionLabel.Text = "Должность:"
+$positionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($positionLabel)
+
+$positionValue = New-Object System.Windows.Forms.TextBox
+$positionValue.Location = New-Object System.Drawing.Point(125, 200)
+$positionValue.Size = New-Object System.Drawing.Size(300, 22)
+$positionValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($positionValue)
+
+# === НОВОЕ ПОЛЕ: ОРГАНИЗАЦИЯ (Y=230) ===
+$companyLabel = New-Object System.Windows.Forms.Label
+$companyLabel.Location = New-Object System.Drawing.Point(15, 230)
+$companyLabel.Size = New-Object System.Drawing.Size(100, 20)
+$companyLabel.Text = "Организация:"
+$companyLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($companyLabel)
+
+$companyComboBox = New-Object System.Windows.Forms.ComboBox
+$companyComboBox.Location = New-Object System.Drawing.Point(125, 230)
+$companyComboBox.Size = New-Object System.Drawing.Size(300, 22)
+$companyComboBox.DropDownStyle = "DropDownList"
+$companyComboBox.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+[void] $companyComboBox.Items.Add("ООО `"СТЭП`"")
+[void] $companyComboBox.Items.Add("ООО `"Балтэнергометалл`"")
+$companyComboBox.SelectedIndex = 0 
+$tabOutput.Controls.Add($companyComboBox)
+
+# --- Дата выхода (Y=260 - СДВИНУЛИ НИЖЕ) ---
+$exitDateLabel = New-Object System.Windows.Forms.Label
+$exitDateLabel.Location = New-Object System.Drawing.Point(15, 260) # +30
+$exitDateLabel.Size = New-Object System.Drawing.Size(100, 20)
+$exitDateLabel.Text = "Дата выхода:"
+$exitDateLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($exitDateLabel)
+
+$dtExitDate = New-Object System.Windows.Forms.DateTimePicker
+$dtExitDate.Location = New-Object System.Drawing.Point(125, 260) # +30
+$dtExitDate.Size = New-Object System.Drawing.Size(150, 22)
+$dtExitDate.Format = "Short"
+$dtExitDate.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($dtExitDate)
+
+# --- Телефон (Y=290 - СДВИНУЛИ НИЖЕ) ---
+$phoneLabel = New-Object System.Windows.Forms.Label
+$phoneLabel.Location = New-Object System.Drawing.Point(15, 290) # +30
+$phoneLabel.Size = New-Object System.Drawing.Size(100, 20)
+$phoneLabel.Text = "Телефон:"
+$phoneLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($phoneLabel)
+
+$phoneValue = New-Object System.Windows.Forms.TextBox
+$phoneValue.Location = New-Object System.Drawing.Point(125, 290) # +30
+$phoneValue.Size = New-Object System.Drawing.Size(150, 22)
+$phoneValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($phoneValue)
+
+# --- Руководитель (Y=320 - СДВИНУЛИ НИЖЕ) ---
+$managerLabel = New-Object System.Windows.Forms.Label
+$managerLabel.Location = New-Object System.Drawing.Point(15, 320) # +30
+$managerLabel.Size = New-Object System.Drawing.Size(100, 20)
+$managerLabel.Text = "Руководитель:"
+$managerLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($managerLabel)
+
+$comboManager = New-Object System.Windows.Forms.ComboBox
+$comboManager.Location = New-Object System.Drawing.Point(125, 320) # +30
+$comboManager.Size = New-Object System.Drawing.Size(300, 22)
+$comboManager.DropDownStyle = "DropDown"
+$comboManager.AutoCompleteMode = "SuggestAppend"
+$comboManager.AutoCompleteSource = "ListItems"
+$comboManager.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+foreach ($item in $script:managers) { $null = $comboManager.Items.Add($item.DisplayName) }
+$tabOutput.Controls.Add($comboManager)
+
+# --- Врем. пароль (Y=350 - СДВИНУЛИ НИЖЕ) ---
+$passwordLabel = New-Object System.Windows.Forms.Label
+$passwordLabel.Location = New-Object System.Drawing.Point(15, 350) # +30
+$passwordLabel.Size = New-Object System.Drawing.Size(100, 20)
+$passwordLabel.Text = "Врем. пароль:"
+$passwordLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($passwordLabel)
+
+$passwordValue = New-Object System.Windows.Forms.TextBox
+$passwordValue.Location = New-Object System.Drawing.Point(125, 350) # +30
+$passwordValue.Size = New-Object System.Drawing.Size(200, 22)
+$passwordValue.Text = $script:Config.DefaultPassword
+$passwordValue.BackColor = [System.Drawing.Color]::White
+$passwordValue.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($passwordValue)
+
+# --- Пул групп (Y=380 - СДВИНУЛИ НИЖЕ) ---
+$groupsPoolLabel = New-Object System.Windows.Forms.Label
+$groupsPoolLabel.Location = New-Object System.Drawing.Point(15, 380) # +30
+$groupsPoolLabel.Size = New-Object System.Drawing.Size(100, 20)
+$groupsPoolLabel.Text = "Пул групп AD:"
+$groupsPoolLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($groupsPoolLabel)
+
+$comboGroupsPool = New-Object System.Windows.Forms.ComboBox
+$comboGroupsPool.Location = New-Object System.Drawing.Point(125, 380) # +30
+$comboGroupsPool.Size = New-Object System.Drawing.Size(300, 22)
+$comboGroupsPool.DropDownStyle = "DropDownList"
+$comboGroupsPool.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+foreach ($item in $GroupPools.Keys) { $null = $comboGroupsPool.Items.Add($item) }
+$tabOutput.Controls.Add($comboGroupsPool)
+
+# --- Группы (перемещаем в правую часть) ---
+$groupsLabel = New-Object System.Windows.Forms.Label
+$groupsLabel.Location = New-Object System.Drawing.Point(480, 20)  # В правый верхний угол
+$groupsLabel.Size = New-Object System.Drawing.Size(100, 20)
+$groupsLabel.Text = "Группы AD:"
+$groupsLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Regular)
+$tabOutput.Controls.Add($groupsLabel)
+
+$listGroups = New-Object System.Windows.Forms.CheckedListBox
+$listGroups.Location = New-Object System.Drawing.Point(480, 45)  # Чуть ниже этикетки
+$listGroups.Size = New-Object System.Drawing.Size(320, 535)  # Большой размер: ширина 410, высота 535 (займет всю правую часть до кнопок)
+$listGroups.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$tabOutput.Controls.Add($listGroups)
+
+
+# --- Кнопка (Y=580 - СДВИНУЛИ НИЖЕ) ---
+$buttonCreate = New-Object System.Windows.Forms.Button
+$buttonCreate.Location = New-Object System.Drawing.Point(15, 530) 
+$buttonCreate.Size = New-Object System.Drawing.Size(220, 40)
+$buttonCreate.Text = "Создать учетную запись"
+$buttonCreate.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$buttonCreate.BackColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
+$buttonCreate.ForeColor = [System.Drawing.Color]::White
+$buttonCreate.FlatStyle = "Flat"
+$buttonCreate.FlatAppearance.BorderSize = 0
+$buttonCreate.Cursor = [System.Windows.Forms.Cursors]::Hand
+$tabOutput.Controls.Add($buttonCreate)
+
+
+# === КНОПКА ОЧИСТИТЬ НА ВКЛАДКЕ ДАННЫХ ===
+$buttonClearOutput = New-Object System.Windows.Forms.Button
+$buttonClearOutput.Location = New-Object System.Drawing.Point(260, 530)
+$buttonClearOutput.Size = New-Object System.Drawing.Size(120, 40)
+$buttonClearOutput.Text = "Очистить"
+$buttonClearOutput.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$buttonClearOutput.BackColor = [System.Drawing.Color]::FromArgb(108, 117, 125)
+$buttonClearOutput.ForeColor = [System.Drawing.Color]::White
+$buttonClearOutput.FlatStyle = "Flat"
+$buttonClearOutput.FlatAppearance.BorderSize = 0
+$buttonClearOutput.Cursor = [System.Windows.Forms.Cursors]::Hand
+$buttonClearOutput.Add_Click({ Clear-Form })
+
+# === ВКЛАДКА ЛОГА ===
+$tabLog = New-Object System.Windows.Forms.TabPage
+$tabLog.Text = "Лог"
+$tabLog.BackColor = [System.Drawing.Color]::White
+$logBox = New-Object System.Windows.Forms.TextBox
+$logBox.Multiline = $true
+$logBox.ScrollBars = "Vertical"
+$logBox.Location = New-Object System.Drawing.Point(15, 15)
+$logBox.Size = New-Object System.Drawing.Size(860, 585)
+# $logBox.Anchor = "Top,Bottom,Left,Right"
+$logBox.Font = New-Object System.Drawing.Font("Consolas", 9)
+$logBox.ReadOnly = $true
+$logBox.BackColor = [System.Drawing.Color]::White
+$logBox.ForeColor = [System.Drawing.Color]::Black
+
+# === ДОБАВЛЯЕМ ЭЛЕМЕНТЫ УПРАВЛЕНИЯ НА ВКЛАДКИ ===
+$tabInput.Controls.Add($buttonClear)
+$tabInput.Controls.Add($textBox)
+$tabInput.Controls.Add($buttonParse)
+
+$tabOutput.Controls.Add($fioLabel)
+$tabOutput.Controls.Add($fioValue)
+$tabOutput.Controls.Add($lastNameLabel)
+$tabOutput.Controls.Add($lastNameValue)
+$tabOutput.Controls.Add($firstNameLabel)
+$tabOutput.Controls.Add($firstNameValue)
+$tabOutput.Controls.Add($loginLabel)
+$tabOutput.Controls.Add($loginValue)
+$tabOutput.Controls.Add($emailLabel)
+$tabOutput.Controls.Add($emailValue)
+$tabOutput.Controls.Add($workplaceLabel)
+$tabOutput.Controls.Add($comboWorkplace)
+$tabOutput.Controls.Add($positionLabel)
+$tabOutput.Controls.Add($positionValue)
+$tabOutput.Controls.Add($exitDateLabel)
+$tabOutput.Controls.Add($dtExitDate)
+$tabOutput.Controls.Add($phoneLabel)
+$tabOutput.Controls.Add($phoneValue)
+$tabOutput.Controls.Add($managerLabel)
+$tabOutput.Controls.Add($comboManager)
+$tabOutput.Controls.Add($passwordLabel)
+$tabOutput.Controls.Add($passwordValue)
+$tabOutput.Controls.Add($groupsPoolLabel)
+$tabOutput.Controls.Add($comboGroupsPool)
+$tabOutput.Controls.Add($groupsLabel)
+$tabOutput.Controls.Add($listGroups)
+$tabOutput.Controls.Add($buttonCreate)
+$tabOutput.Controls.Add($buttonClearOutput)
+$tabOutput.Controls.Add($progressLabel)
+
+$tabLog.Controls.Add($logBox)
+
+# === ДОБАВЛЯЕМ ВКЛАДКИ В TABCONTROL ===
+$tabControl.Controls.Add($tabInput)
+$tabControl.Controls.Add($tabOutput)
+$tabControl.Controls.Add($tabLog)
+
+# === СОЗДАЁМ И НАСТРАИВАЕМ ОСНОВНУЮ ФОРМУ ===
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Создание пользователя в AD. Exchange + SfB. Папки и квота"
+$form.Size = New-Object System.Drawing.Size(920, 750)
+$form.StartPosition = "CenterScreen"
+$form.BackColor = [System.Drawing.Color]::FromArgb(245, 245, 245)
+$form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.FormBorderStyle = "FixedDialog"
+$form.Controls.Add($tabControl)
+
+# === ОБНОВЛЕННАЯ ФУНКЦИЯ ПАРСИНГА С АВТОМАТИЧЕСКИМ ВЫБОРОМ ПУЛА ===
+$buttonParse.Add_Click({
+    Update-Progress -Message " Парсинг данных..." -Color "Black" -BackgroundColor "Yellow"
+    
+    # ЗАГРУЖАЕМ ДАННЫЕ AD ТОЛЬКО КОГДА НУЖНЫ
+    if (-not (Initialize-ADData)) {
+      Update-Progress -Message "❌ Ошибка загрузки AD" -Color "Red" -BackgroundColor "LightRed"
+      return
+    }
+    
+    $inputText = $textBox.Text
+    $userData = ConvertFrom-UserData -inputText $inputText
+
+    if (-not $userData.FIO) {
+      Update-Progress -Message "❌ Ошибка: Не найдено ФИО" -Color "Red" -BackgroundColor "LightRed"
+      [System.Windows.Forms.MessageBox]::Show("❌ Ошибка: Не найдено ФИО.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return
+    }
+
+    $fioValue.Text = $userData.FIO
+    $nameParts = $userData.FIO -split '\s+'
+    $lastName = $nameParts[0]
+    $firstName = $nameParts[1]
+    $lastNameValue.Text = $lastName
+    $firstNameValue.Text = $firstName
+    $firstNameEN = Convert-ToTranslit $firstName
+    $lastNameEN = Convert-ToTranslit $lastName
+    $login = "$($firstNameEN).$($lastNameEN)" -replace "\s+", ""
+    $loginValue.Text = $login
+    $email = "$login@stepcon.ru"
+    $emailValue.Text = $email
+    $positionValue.Text = $userData.Position
+
+    if ($userData.Contact) {
+      $phoneRaw = Get-PhoneFromContact -contactText $userData.Contact
+      if ($phoneRaw) {
+        $phoneValue.Text = Format-Phone $phoneRaw
+        Write-Log "✅ Извлечен телефон: $phoneRaw -> $($phoneValue.Text)"
+      }
+      else {
+        Write-Log "⚠️ Телефон не найден в контактной информации"
+        $phoneValue.Text = ""
+      }
+    }
+
+    if ($userData.ExitDate) {
+      Write-Log "🔍 Обработка даты выхода: '$($userData.ExitDate)'"
+      $parsedDate = Convert-UserDate -dateString $userData.ExitDate
+      if ($parsedDate) {
+        $dtExitDate.Value = $parsedDate
+        Write-Log "✅ Установлена дата выхода: $($parsedDate.ToString('dd.MM.yyyy'))"
+      }
+      else {
+        Write-Log "❌ Не удалось распознать дату, оставлена текущая"
+      }
+    }
+
+    # === ПРОВЕРКА СУЩЕСТВУЮЩИХ ПОЛЬЗОВАТЕЛЕЙ ===
+    Update-Progress -Message "🔍 Поиск похожих пользователей в AD..." -Color "Black" -BackgroundColor "Yellow"
+    Write-Log "🔍 Поиск похожих пользователей в AD..."
+    $existingUsers = Find-ExistingUsers -firstName $firstName -lastName $lastName -login $login
+    
+    $hasUsers = ($existingUsers.Count -gt 0)
+
+    if ($hasUsers) {
+      Update-Progress -Message "⚠️ Обнаружены существующие пользователи" -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "🟡 ДИАЛОГ: Найдено похожих пользователей"
+        
+      foreach ($user in $existingUsers) {
+        $status = if ($user.Enabled) { "Активен" } else { "Отключен" }
+        Write-Log "   - $($user.DisplayName) (Логин: $($user.SamAccountName)) - Статус: $status"
+      }
+        
+      Write-Log "🟡 ДИАЛОГ: Показываем диалог выбора..."
+      $action = Show-ExistingUserDialog -login $login -firstName $firstName -lastName $lastName -existingUsers $existingUsers -targetOU "" -isFromParse $true
+        
+      if ($null -eq $action) {
+        Update-Progress -Message "❌ Действие отменено пользователем" -Color "Red" -BackgroundColor "LightRed"
+        Write-Log "❌ Действие отменено пользователем"
+        return
+      }
+
+      # =========================================================
+      # НОВОЕ: СОХРАНЯЕМ ВЫБОР ЧЕКБОКСА (ОБНОВЛЯТЬ ЛИ ГРУППЫ)
+      # =========================================================
+      if ($action.Action -eq "UpdateUser") {
+        # Если в окне стояла галочка, переменная станет $true
+        $script:keepExistingGroups = $action.KeepGroups 
+        Write-Log "ℹ️ Режим обновления. Оставить текущие группы: $($script:keepExistingGroups)"
+      } else {
+        # Если выбрали "Разные люди" (создание нового), сбрасываем в $false
+        $script:keepExistingGroups = $false
+      }
+      # =========================================================
+        
+      if ($action.Action -eq "UpdateUser") {
+        $userToUpdate = $action.UserToUpdate
+        $loginValue.Text = $userToUpdate.SamAccountName
+        $emailValue.Text = "$($userToUpdate.SamAccountName)@stepcon.ru"
+            
+        $login = $userToUpdate.SamAccountName
+        $email = "$($userToUpdate.SamAccountName)@stepcon.ru"
+
+        $buttonCreate.Text = "Обновить учетную запись"
+        $buttonCreate.BackColor = [System.Drawing.Color]::FromArgb(255, 193, 7)
+            
+        Update-Progress -Message "✅ Режим обновления: $($userToUpdate.DisplayName)" -Color "Yellow" -BackgroundColor "LightYellow"
+        Write-Log "✅ Выбрано обновление пользователя: $($userToUpdate.SamAccountName)"
+        Write-Log "ℹ️ Форма заполнена данными существующего пользователя"
+            
+      } 
+    }
+    else {
+      Update-Progress -Message "✅ Похожих пользователей не найдено, можно создавать нового" -Color "Green" -BackgroundColor "LightGreen"
+      Write-Log "✅ Похожих пользователей не найдено, можно создавать нового"
+    }
+
+    # АВТОМАТИЧЕСКИЙ ВЫБОР ПОДРАЗДЕЛЕНИЯ И ПУЛА ГРУПП
+    if ($userData.Workplace) {
+      Update-Progress -Message "🔍 Поиск подразделения..." -Color "Black" -BackgroundColor "Yellow"
+      $workplaceMatch = Find-OUByText -searchText $userData.Workplace
+      if ($workplaceMatch) {
+        $comboWorkplace.SelectedItem = $workplaceMatch.DisplayName
+        Write-Log "✅ Найдено подразделение: $($workplaceMatch.DisplayName)"
+            
+        # АВТОМАТИЧЕСКИЙ ВЫБОР ПУЛА ГРУПП
+        $detectedDepartment = Get-DepartmentByKeywords -workplaceText $userData.Workplace
+        if ($detectedDepartment) {
+          # Пробуем автоматически определить пул групп
+          $autoPool = Get-AutoGroupPool -departmentName $detectedDepartment -workplaceText $userData.Workplace
+                
+          if ($autoPool -and $GroupPools.ContainsKey($autoPool)) {
+            $comboGroupsPool.SelectedItem = $autoPool
+            Write-Log "✅ Автоматически выбран пул групп: $autoPool для подразделения: $detectedDepartment"
+          }
+          else {
+            # Если автоматически не определили, используем старый метод
+            if ($GroupPools.ContainsKey("$detectedDepartment")) {
+              $comboGroupsPool.SelectedItem = "$detectedDepartment"
+              Write-Log "✅ Автоматически выбран пул групп: $detectedDepartment"
+            }
+          }
+        }
+      }
+      else {
+        Write-Log "⚠️ Подразделение '$($userData.Workplace)' не найдено в AD"
+      }
+    }
+
+    if ($userData.Manager) {
+      Update-Progress -Message "🔍 Поиск руководителя..." -Color "Black" -BackgroundColor "Yellow"
+      $managerMatch = Find-ManagerByText -searchText $userData.Manager
+      if ($managerMatch) {
+        $comboManager.SelectedItem = $managerMatch.DisplayName
+        Write-Log "✅ Найден руководитель: $($managerMatch.DisplayName)"
+      }
+      else {
+        Write-Log "⚠️ Руководитель '$($userData.Manager)' не найден в AD"
+      }
+    }
+
+    Update-Progress -Message "✅ Парсинг завершен: $login" -Color "Green" -BackgroundColor "LightGreen"
+    Write-Log "✅ Парсинг завершён. Логин: $login, Почта: $email"
+    $tabControl.SelectedIndex = 1
+  })
+
+# === ОБРАБОТЧИК ВЫБОРА ПУЛА ГРУПП ===
+$comboGroupsPool.Add_SelectedIndexChanged({
+    $selectedPool = $comboGroupsPool.SelectedItem
+    if ([string]::IsNullOrEmpty($selectedPool)) {
+      $listGroups.Items.Clear()
+      Write-Log "⚠️ Пул групп не выбран"
+      return
+    }
+
+    if ($GroupPools.ContainsKey($selectedPool)) {
+      $listGroups.Items.Clear()
+      foreach ($item in $GroupPools[$selectedPool]) {
+        $null = $listGroups.Items.Add($item, $true)
+      }
+      Write-Log "✅ Загружены группы из пула: $selectedPool"
+    }
+    else {
+      Write-Log "⚠️ Пул групп '$selectedPool' не найден в конфигурации"
+    }
+  })
+
+# === ОБРАБОТЧИК ИЗМЕНЕНИЯ ЛОГИНА ===
+$loginValue.Add_TextChanged({
+    if (-not $loginValue.ReadOnly) {
+      $newLogin = $loginValue.Text.Trim()
+      if (-not [string]::IsNullOrWhiteSpace($newLogin)) {
+        $emailValue.Text = "$newLogin@stepcon.ru"
+        Write-Log "🔄 Email автоматически обновлен: $($emailValue.Text)"
+      }
+    }
+  })
+
+# === ОБРАБОТЧИК КНОПКИ СОЗДАНИЯ/ОБНОВЛЕНИЯ ===
+$buttonCreate.Add_Click({
+    Update-Progress -Message "Начало обработки..." -Color "Black" -BackgroundColor "Yellow"
+    
+    # === ОСНОВНЫЕ ДАННЫЕ ===
+    $firstName = $firstNameValue.Text.Trim()
+    $lastName = $lastNameValue.Text.Trim()
+    $login = $loginValue.Text.Trim()
+    $email = $emailValue.Text.Trim()
+    $position = $positionValue.Text.Trim()
+    $phone = $phoneValue.Text.Trim()
+
+    # === ОПРЕДЕЛЯЕМ РЕЖИМ РАБОТЫ ===
+    $isUpdateMode = ($buttonCreate.Text -eq "Обновить учетную запись")
+    
+    # === ОБРАБОТКА ПАРОЛЯ С УЧЕТОМ РЕЖИМА ===
+    $passwordText = $passwordValue.Text.Trim()
+    $securePassword = $null
+
+    if (-not $isUpdateMode -and [string]::IsNullOrWhiteSpace($passwordText)) {
+      # Режим создания + пустой пароль = ОШИБКА
+      Update-Progress -Message "Пароль не может быть пустым" -Color "Red" -BackgroundColor "LightRed"
+      [System.Windows.Forms.MessageBox]::Show("Введите временный пароль", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return
+    }
+
+    if ($isUpdateMode -and -not [string]::IsNullOrWhiteSpace($passwordText)) {
+      # Режим обновления + пароль указан = меняем пароль
+      $securePassword = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
+    }
+    elseif ($isUpdateMode -and [string]::IsNullOrWhiteSpace($passwordText)) {
+      # Режим обновления + пустой пароль = не меняем пароль
+      $securePassword = $null
+    }
+    else {
+      # Режим создания + пароль указан = используем пароль
+      $securePassword = ConvertTo-SecureString -String $passwordText -AsPlainText -Force
+    }
+
+    $workplaceSelection = $comboWorkplace.SelectedItem
+    if (-not $workplaceSelection) {
+      Update-Progress -Message "Проект/Отдел не выбран" -Color "Red" -BackgroundColor "LightRed"
+      [System.Windows.Forms.MessageBox]::Show("Проект/Отдел не выбран.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return
+    }
+
+    $selectedOU = $script:ous | Where-Object { $_.DisplayName -eq $workplaceSelection }
+    if (-not $selectedOU) {
+      Update-Progress -Message "Объект подразделения не найден" -Color "Red" -BackgroundColor "LightRed"
+      [System.Windows.Forms.MessageBox]::Show("Не найден объект для выбранного проекта/отдела.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return
+    }
+
+    if (-not $firstName -or -not $lastName -or -not $login) {
+      Update-Progress -Message "ФИО и логин обязательны" -Color "Red" -BackgroundColor "LightRed"
+      [System.Windows.Forms.MessageBox]::Show("ФИО и логин обязательны.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return
+    }
+
+    # === ПРОВЕРЯЕМ РЕЖИМ РАБОТЫ ПО ТЕКСТУ КНОПКИ ===
+    if ($isUpdateMode) {
+      Update-Progress -Message "Режим обновления: $login" -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "Режим обновления: выполняем обновление пользователя $login"
+        
+      $selectedGroups = @()
+      for ($i = 0; $i -lt $listGroups.Items.Count; $i++) {
+        if ($listGroups.GetItemChecked($i)) {
+          $selectedGroups += $listGroups.Items[$i]
+        }
+      }
+        
+      # --- ДИНАМИЧЕСКИЙ ТЕКСТ ПРО ГРУППЫ ДЛЯ ОКНА ПОДТВЕРЖДЕНИЯ ---
+      $groupsConfirmText = if ($script:keepExistingGroups) {
+          "• Группы доступа: НЕ изменяются (сохранены текущие права)`n"
+      } else {
+          "• Обновление групп доступа (старые удалятся, новые добавятся)`n"
+      }
+      $confirmResult = [System.Windows.Forms.MessageBox]::Show(
+        "Вы собираетесь ОБНОВИТЬ существующего пользователя:`n`n" +
+        "ФИО: $lastName $firstName`n" +
+        "Логин: $login`n" +
+        "Подразделение: $($selectedOU.DisplayName)`n" +
+        $(if ($null -ne $securePassword) { "• Сброс пароля`n" } else { "• Пароль: не изменяется`n" }) +
+        "• Обновление должности, отдела, телефона`n" +
+        $groupsConfirmText + "`n" +
+        "Продолжить обновление?",
+        "Подтверждение обновления пользователя",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Warning
+      )
+        
+      if ($confirmResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+        Update-Progress -Message "Обновление пользователя..." -Color "Black" -BackgroundColor "Yellow"
+            
+        $userToUpdate = Get-ADUser -Filter "SamAccountName -eq '$login'" -Properties DisplayName, Enabled, DistinguishedName -ErrorAction SilentlyContinue
+        if ($userToUpdate) {
+
+          # --- ОПРЕДЕЛЯЕМ, НУЖНО ЛИ ОБНОВЛЯТЬ ГРУППЫ ---
+          $shouldUpdateGroups = -not $script:keepExistingGroups
+
+          $success = Update-ExistingUser -login $userToUpdate.SamAccountName -firstName $firstName -lastName $lastName -position $position -workplaceSelection $workplaceSelection -selectedOU $selectedOU -phone $phone -managerSelection $comboManager.SelectedItem -securePassword $securePassword -selectedGroups $selectedGroups -updateOptions @{
+            EnableAccount = $true
+            ResetPassword = ($securePassword -ne $null)
+            UpdateGroups  = $shouldUpdateGroups
+            UpdateInfo    = $true
+            UpdateManager = $true
+            MoveOU        = $true
+          }
+                
+          if ($success) {
+            Update-Progress -Message "Пользователь успешно обновлен: $login" -Color "Green" -BackgroundColor "LightGreen"
+
+            $buttonCreate.Text = "Создать учетную запись"
+            $buttonCreate.BackColor = [System.Drawing.Color]::FromArgb(40, 167, 69)
+          }
+          else {
+            Update-Progress -Message "Ошибка при обновлении пользователя" -Color "Red" -BackgroundColor "LightRed"
+            [System.Windows.Forms.MessageBox]::Show("Произошла ошибка при обновлении пользователя. Проверьте лог для деталей.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+          }
+        }
+        else {
+          Update-Progress -Message "Пользователь не найден в AD" -Color "Red" -BackgroundColor "LightRed"
+          [System.Windows.Forms.MessageBox]::Show("Пользователь $login не найден в AD.", "Ошибка", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        }
+      }
+      else {
+        Update-Progress -Message "Обновление отменено" -Color "Red" -BackgroundColor "LightRed"
+        Write-Log "Обновление пользователя отменено пользователем"
+      }
+      return
+    }
+
+    # === РЕЖИМ "РАЗНЫЕ ЛЮДИ" ===
+    if ($script:isDifferentPersonMode) {
+      Update-Progress -Message "Режим 'Разные люди': проверка уникальности..." -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "Режим 'Разные люди': создаем нового пользователя с проверкой уникальности"
+        
+      $finalCheck = Get-ADUser -Filter "SamAccountName -eq '$login'" -ErrorAction SilentlyContinue
+      if ($null -ne $finalCheck) {
+        Update-Progress -Message "Логин уже используется" -Color "Red" -BackgroundColor "LightRed"
+        Write-Log "Логин '$login' уже используется существующим пользователем!"
+            
+        [System.Windows.Forms.MessageBox]::Show(
+          "Логин '$login' уже используется!`n`n" +
+          "Существующий пользователь:`n" +
+          "• $($finalCheck.DisplayName)`n" +
+          "• Логин: $($finalCheck.SamAccountName)`n" +
+          "• Статус: $(if ($finalCheck.Enabled) {'Активен'} else {'Отключен'})`n`n" +
+          "Пожалуйста, придумайте другой уникальный логин.",
+          "Логин уже существует",
+          [System.Windows.Forms.MessageBoxButtons]::OK,
+          [System.Windows.Forms.MessageBoxIcon]::Error
+        )
+        return
+      }
+        
+      Update-Progress -Message "Создание нового пользователя..." -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "Создание нового пользователя (режим 'Разные люди'): $login"
+      $selectedCompany = $companyComboBox.SelectedItem.ToString()  # Получаем значение из ComboBox
+      New-ADUserAccount -login $login -firstName $firstName -lastName $lastName -email $email -position $position -workplaceSelection $workplaceSelection -selectedOU $selectedOU -phone $phone -securePassword $securePassword -managerSelection $comboManager.SelectedItem -Company $selectedCompany
+      $script:isDifferentPersonMode = $false
+      Update-Progress -Message "Пользователь создан: $login" -Color "Green" -BackgroundColor "LightGreen"
+      return
+    }
+
+    # === СТАНДАРТНАЯ ПРОВЕРКА ДЛЯ НОВОГО ПОЛЬЗОВАТЕЛЯ ===
+    Update-Progress -Message "Проверка существующих пользователей..." -Color "Black" -BackgroundColor "Yellow"
+    Write-Log "Проверка существующих пользователей для: $login"
+    $existingUsers = Find-ExistingUsers -firstName $firstName -lastName $lastName -login $login
+    
+    if ($existingUsers.Count -gt 0) {
+      Update-Progress -Message "Обнаружены существующие пользователи" -Color "Black" -BackgroundColor "Yellow"
+      Write-Log "Обнаружены существующие пользователи, показываем диалог..."
+      $action = Show-ExistingUserDialog -login $login -firstName $firstName -lastName $lastName -existingUsers $existingUsers -targetOU $selectedOU.DisplayName -isFromParse $false
+        
+      if ($null -eq $action) {
+        Update-Progress -Message "Действие отменено" -Color "Red" -BackgroundColor "LightRed"
+        Write-Log "Действие отменено пользователем"
+        return
+      }
+        
+      if ($action.Action -eq "UpdateUser") {
+        $buttonCreate.Text = "Обновить учетную запись"
+        $buttonCreate.BackColor = [System.Drawing.Color]::FromArgb(255, 193, 7)
+        Update-Progress -Message "Режим обновления активирован" -Color "Black" -BackgroundColor "Yellow"
+        Write-Log "Режим обновления активирован. Нажмите 'Обновить учетную запись' для подтверждения."
+            
+        [System.Windows.Forms.MessageBox]::Show(
+          "Режим обновления активирован!`n`n" +
+          "Проверьте данные и нажмите кнопку 'Обновить учетную запись' для подтверждения.",
+          "Режим обновления",
+          [System.Windows.Forms.MessageBoxButtons]::OK,
+          [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+        return
+      }
+      elseif ($action.Action -eq "DifferentPerson") {
+        $script:isDifferentPersonMode = $true
+        Set-FieldsEditable -editable $true
+    
+        # ДОПОЛНИТЕЛЬНО РАЗБЛОКИРОВАТЬ ПОЛЕ ЛОГИНА
+        $loginValue.ReadOnly = $false
+        $loginValue.BackColor = [System.Drawing.Color]::White
+    
+        Update-Progress -Message "Режим 'Разные люди' активирован" -Color "Black" -BackgroundColor "Yellow"
+        Write-Log "Установлен режим 'Разные люди', поле Логин разблокировано для редактирования"
+    
+        [System.Windows.Forms.MessageBox]::Show(
+          "Режим 'Разные люди' активирован!`n`n" +
+          "Поле Логин разблокировано для редактирования.`n" +
+          "Пожалуйста:`n" +
+          "1. Придумайте УНИКАЛЬНЫЙ логин и Фамилию/Имя для нового пользователя`n" +
+          "2. Email обновится автоматически на основе логина`n" +
+          "3. Убедитесь, что новый логин не используется другими пользователями`n`n" +
+          "После ввода уникального логина нажмите 'Создать учетную запись'",
+          "Режим создания нового пользователя",
+          [System.Windows.Forms.MessageBoxButtons]::OK,
+          [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+        return
+      }
+    }
+    
+    # === СОЗДАНИЕ НОВОГО ПОЛЬЗОВАТЕЛЯ ===
+    Update-Progress -Message "Создание нового пользователя..." -Color "Black" -BackgroundColor "Yellow"
+    Write-Log "Создание нового пользователя: $login"
+    
+    $finalCheck = Get-ADUser -Filter "SamAccountName -eq '$login'" -ErrorAction SilentlyContinue
+    if ($null -ne $finalCheck) {
+      Update-Progress -Message "Пользователь уже существует" -Color "Red" -BackgroundColor "LightRed"
+      Write-Log "КРИТИЧЕСКАЯ ОШИБКА: Пользователь $login уже существует в AD!"
+        
+      [System.Windows.Forms.MessageBox]::Show(
+        "Невозможно создать пользователя!`n`n" +
+        "Пользователь с логином '$login' уже существует в Active Directory.`n`n" +
+        "Данные существующего пользователя:`n" +
+        "• Имя: $($finalCheck.DisplayName)`n" +
+        "• Логин: $($finalCheck.SamAccountName)`n" +
+        "• Статус: $(if ($finalCheck.Enabled) {'Активен'} else {'Отключен'})`n`n" +
+        "Пожалуйста, используйте режим обновления или измените логин.",
+        "Ошибка создания пользователя",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error
+      )
+      return
+    }
+    $selectedCompany = $companyComboBox.SelectedItem.ToString()  # Получаем значение из ComboBox
+    New-ADUserAccount -login $login -firstName $firstName -lastName $lastName -email $email -position $position -workplaceSelection $workplaceSelection -selectedOU $selectedOU -phone $phone -securePassword $securePassword -managerSelection $comboManager.SelectedItem -Company $selectedCompany
+    Update-Progress -Message "Пользователь создан: $login" -Color "Green" -BackgroundColor "LightGreen"
+  })
+
+# === ФОНОВАЯ ИНИЦИАЛИЗАЦИЯ СЕРВИСОВ ПРИ ЗАПУСКЕ ===
+Write-Log "🔄 Запуск фоновой инициализации сервисов..."
+
+# Быстрая загрузка AD модуля (он легкий)
+try {
+  Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+  Write-Log "✅ Модуль Active Directory загружен"
+}
+catch {
+  Write-Log "⚠️ Модуль Active Directory не загружен"
+}
+
+# Обработчик закрытия формы
+$form.Add_FormClosing({
+    Write-Log "📋 Закрытие приложения..."
+    Close-AllSessions
+  })
+
+#обработчик принудительного закрытия
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+  Write-Host "`n🔄 Закрытие сессий..." -ForegroundColor Yellow
+  Close-AllSessions
+}
+
+# Глобальный обработчик ошибок для гарантированного закрытия сессий
+try {
+  $form.ShowDialog() | Out-Null
+}
+catch {
+  Write-Host "❌ Критическая ошибка: $($_.Exception.Message)" -ForegroundColor Red
+  Write-Log "❌ Критическая ошибка: $($_.Exception.Message)"
+}
+finally {
+  # Гарантированное закрытие всех сессий при любом исходе
+  Close-AllSessions
+}
